@@ -1,0 +1,5 @@
+build/
+out/
+phone/cache/
+__pycache__/
+*.bmp
