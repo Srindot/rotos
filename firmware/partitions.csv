@@ -1,0 +1,7 @@
+# ROTOS flash layout (4 MB: ESP32 DevKit V1, XIAO ESP32-C3). No OTA by design.
+# The app is ~630 KB; mappack holds two 1.5 MB map slots (see hal_storage_esp.c).
+# Name,    Type, SubType, Offset,   Size
+nvs,       data, nvs,     0x9000,   0x6000
+phy_init,  data, phy,     0xf000,   0x1000
+factory,   app,  factory, 0x10000,  0xF0000
+mappack,   data, 0x40,    0x100000, 0x300000

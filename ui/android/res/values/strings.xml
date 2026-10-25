@@ -1,0 +1,94 @@
+<resources>
+    <string name="app_name">ROTOS</string>
+    <string name="tagline">Speed 400 navigator</string>
+
+    <string name="link_idle">ROTOS offline</string>
+    <string name="link_searching">Looking for ROTOS…</string>
+    <string name="link_connected">ROTOS connected</string>
+    <string name="link_reconnecting">Reconnecting…</string>
+    <string name="link_lost">Link lost</string>
+    <string name="link_not_found">ROTOS not found · retry</string>
+    <string name="connect_title">Connect to ROTOS</string>
+    <string name="connect_off">Off · switch on to link with the bike</string>
+    <string name="connect_searching">Looking for ROTOS…</string>
+    <string name="connect_on">Connected · clock, weather and calls on ROTOS</string>
+    <string name="connect_reconnecting">Reconnecting…</string>
+    <string name="connect_failed">ROTOS not found. Is it powered on and nearby?</string>
+    <string name="going_to">Ride to %1$s</string>
+    <string name="gmaps_title">Navigate with Google Maps</string>
+    <string name="open_google_maps">Open Google Maps</string>
+    <string name="mirror_allow">Allow ROTOS to read Google Maps turns</string>
+    <string name="mirror_need_access">To show Google Maps’ turns on ROTOS, allow notification access once (ROTOS only reads Google Maps’ navigation notification).</string>
+    <string name="mirror_ready">Navigate in Google Maps as usual. When it starts guiding, ROTOS builds the map around you and shows your position and every turn; when Google Maps stops, the ride ends.</string>
+    <string name="mirror_ready_offline">Switch on “Connect to ROTOS” above, then navigate in Google Maps as usual: ROTOS follows by itself.</string>
+    <string name="mirror_live">On ROTOS now: %1$s</string>
+    <string name="share_hint">To set where you are going from here: in Google Maps tap a place → Share → ROTOS (or pick a recent one), then Start ride. With no place, ROTOS maps the area around you.</string>
+    <string name="too_far_area">%1$s is %2$d km away: ROTOS maps the area around you; Google Maps guides the whole way.</string>
+    <string name="recent_shared">Recent shared places</string>
+    <string name="share_first">Share a place from Google Maps first (place → Share → ROTOS)</string>
+    <string name="tap_to_clear">tap to clear</string>
+    <string name="too_far">%1$s is %2$d km away. ROTOS maps cover up to about %3$d km per ride: pick a closer place.</string>
+    <string name="no_places">No place found for “%1$s”</string>
+    <string name="hero_connected">ROTOS is connected</string>
+    <string name="hero_connected_body">Clock, weather, battery and calls are on ROTOS now.\n\nFor the blue route line: in Google Maps tap your destination → Share → ROTOS. ROTOS starts the navigation for you.\n\nStarting navigation in Google Maps directly also works, but then ROTOS shows only the map and turns (Google does not tell other apps the destination).</string>
+
+    <string name="where_to">Where to?</string>
+    <string name="dest_hint">Search a place</string>
+    <string name="dest_helper">A place name, lat,lon, or share a place from Google Maps</string>
+    <string name="pick_in_google_maps">Pick in Google Maps</string>
+    <string name="recent">Recent</string>
+
+    <string name="hero_title">Ready when you are</string>
+    <string name="hero_steps">1  Switch on Connect to ROTOS
+2  In Google Maps tap your destination → Share → ROTOS
+3  ROTOS draws Google\'s route, Google Maps navigates, ROTOS shows every turn</string>
+    <string name="hero_done">Ride finished</string>
+    <string name="route">Route</string>
+    <string name="map_on_rotos">Map on ROTOS</string>
+    <string name="preview_desc">Map preview, as ROTOS will draw it</string>
+    <string name="km">km</string>
+    <string name="minutes">min</string>
+    <string name="turns">turns</string>
+    <string name="next_turn">next turn</string>
+
+    <string name="riding">Riding</string>
+    <string name="km_left">km left</string>
+    <string name="arrival">arrival</string>
+    <string name="kmh">km/h</string>
+
+    <string name="call_alerts">Call alerts on ROTOS</string>
+    <string name="call_alerts_desc">Caller at the bottom of ROTOS; A rejects and texts “I\'m riding right now, I\'ll call you back later”</string>
+
+    <string name="advanced">Advanced</string>
+    <string name="demo_ride">Demo ride (no GPS, simulated motion)</string>
+    <string name="sample_route">Sample route (offline, IIIT → Durgam Cheruvu)</string>
+    <string name="origin_hint">Start lat,lon (empty: GPS)</string>
+    <string name="link">Connection</string>
+    <string name="link_ble">Bluetooth</string>
+    <string name="link_tcp">Simulator</string>
+    <string name="host_port">Simulator host:port</string>
+    <string name="speedup">Demo speed ×</string>
+    <string name="preview_route">Start test ride (demo / sample switches)</string>
+    <string name="no_key_note">No Google Maps key in this build: no routes or maps, only Google Maps\' turns. See android/README.md to add one.</string>
+
+    <string name="start_ride">Start ride</string>
+    <string name="stop_ride">Stop ride</string>
+    <string name="starting">Starting…</string>
+
+    <string name="need_destination">Enter a destination first</string>
+    <string name="bt_off">Bluetooth is off. Turn it on to reach ROTOS.</string>
+    <string name="location_off">Location is off. Turn it on for navigation.</string>
+    <string name="open_settings">Settings</string>
+    <string name="maps_not_installed">Google Maps is not installed</string>
+    <string name="from_google_maps">From Google Maps: %1$s</string>
+    <string name="getting_location">Finding your location…</string>
+    <string name="no_gps_fix">No location fix yet. Step outside or check that location is on.</string>
+    <string name="resolving_link">Reading the Google Maps link…</string>
+    <string name="usage_title">Google usage</string>
+    <string name="usage_ok">ROTOS stops at about half of Google\'s free tier, so you never pay.</string>
+    <string name="usage_warn">Close to ROTOS\'s Google limit. At the cap ROTOS shows Google Maps\' turns without a new map.</string>
+    <string name="usage_capped">Google limit reached: no new maps until it resets (turns still show on ROTOS).</string>
+    <string name="usage_no_key">No Google key in this build: ROTOS shows Google Maps\' turns only.</string>
+    <string name="notify_alerts">Notifications on ROTOS</string>
+    <string name="notify_alerts_desc">New messages pop up at the bottom of ROTOS; C opens them, B/C scroll</string>
+</resources>

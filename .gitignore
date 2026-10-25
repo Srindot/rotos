@@ -1,5 +1,24 @@
+# build output
 build/
 out/
-phone/cache/
 __pycache__/
 *.bmp
+sim/phone/cache/
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# Android (also android/.gitignore)
+android/local.properties
+android/keystore.properties
+android/keystore/
+android/out/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+
+# secrets, wherever they end up
+local.properties
+keystore.properties
+*.jks
+*.keystore

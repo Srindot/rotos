@@ -1,0 +1,8 @@
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/ctp_surface1">
+    <item>
+        <shape>
+            <solid android:color="@color/ctp_base" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+</ripple>

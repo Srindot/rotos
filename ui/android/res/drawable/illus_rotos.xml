@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ROTOS on the handlebar: the 2.8" screen showing a route, the rider arrow
+     and a turn chip, in Catppuccin colours (follows light / dark). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="150dp" android:viewportWidth="120" android:viewportHeight="150">
+    <!-- mount + bar -->
+    <path android:fillColor="@color/ctp_surface2" android:pathData="M10,136h100v6h-100z" />
+    <path android:fillColor="@color/ctp_surface1" android:pathData="M52,122h16v16h-16z" />
+    <!-- case -->
+    <path android:fillColor="@color/ctp_crust" android:pathData="M18,8h84a8,8 0,0 1,8 8v100a8,8 0,0 1,-8 8h-84a8,8 0,0 1,-8 -8v-100a8,8 0,0 1,8 -8z" />
+    <!-- screen -->
+    <path android:fillColor="#FF1E1E2E" android:pathData="M20,16h80v100h-80z" />
+    <!-- map blocks -->
+    <path android:fillColor="#FF262637" android:pathData="M24,20h22v18h-22zM52,20h18v26h-18zM76,22h20v14h-20zM24,72h16v20h-16zM78,64h18v22h-18zM46,96h22v16h-22z" />
+    <path android:fillColor="#FF1B2E26" android:pathData="M24,44h20v20h-20z" />
+    <!-- roads -->
+    <path android:strokeColor="#FF45475A" android:strokeWidth="5" android:fillColor="#00000000" android:pathData="M20,58h80M60,16v100" />
+    <!-- route -->
+    <path android:strokeColor="#FF89DCEB" android:strokeWidth="5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="#00000000" android:pathData="M60,112V58h34" />
+    <!-- rider -->
+    <path android:fillColor="#FFCBA6F7" android:pathData="M60,84l-7,16l7,-4l7,4z" />
+    <!-- turn panel -->
+    <path android:fillColor="#E611111B" android:pathData="M24,20h40v14h-40z" />
+    <path android:strokeColor="#FFA6E3A1" android:strokeWidth="2.5" android:fillColor="#00000000" android:pathData="M29,31v-6h8" />
+    <path android:fillColor="#FFA6E3A1" android:pathData="M37,22l4,3l-4,3z" />
+    <path android:fillColor="#FFCDD6F4" android:pathData="M45,24h15v2h-15zM45,28h10v2h-10z" />
+    <!-- buttons -->
+    <path android:fillColor="@color/ctp_surface1" android:pathData="M110,40h4v10h-4zM110,56h4v10h-4zM110,72h4v10h-4z" />
+</vector>

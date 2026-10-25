@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- route trail (sky) -->
+    <path android:strokeColor="#FF89DCEB" android:strokeWidth="5" android:strokeLineCap="round"
+        android:fillColor="#00000000" android:pathData="M54,80 C54,72 44,70 44,62" />
+    <!-- arrow (mauve), the rider -->
+    <path android:fillColor="#FFCBA6F7" android:pathData="M54,30L39,66l2,2L54,60l13,8 2,-2z" />
+</vector>

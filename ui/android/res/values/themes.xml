@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Material 3 roles mapped onto Catppuccin: mauve = primary action,
+         sky = route / ROTOS link (the device draws the route in sky blue). -->
+    <style name="Base.Theme.Rotos" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/ctp_mauve</item>
+        <item name="colorOnPrimary">@color/ctp_on_accent</item>
+        <item name="colorPrimaryContainer">@color/ctp_mauve_container</item>
+        <item name="colorOnPrimaryContainer">@color/ctp_text</item>
+        <item name="colorSecondary">@color/ctp_sky</item>
+        <item name="colorOnSecondary">@color/ctp_on_accent</item>
+        <item name="colorSecondaryContainer">@color/ctp_sky_container</item>
+        <item name="colorOnSecondaryContainer">@color/ctp_text</item>
+        <item name="colorTertiary">@color/ctp_peach</item>
+        <item name="colorOnTertiary">@color/ctp_on_accent</item>
+        <item name="colorError">@color/ctp_red</item>
+        <item name="colorOnError">@color/ctp_on_accent</item>
+        <item name="colorErrorContainer">@color/ctp_red_container</item>
+        <item name="colorOnErrorContainer">@color/ctp_text</item>
+        <item name="android:colorBackground">@color/ctp_base</item>
+        <item name="colorOnBackground">@color/ctp_text</item>
+        <item name="colorSurface">@color/ctp_base</item>
+        <item name="colorOnSurface">@color/ctp_text</item>
+        <item name="colorSurfaceVariant">@color/ctp_surface0</item>
+        <item name="colorOnSurfaceVariant">@color/ctp_subtext0</item>
+        <item name="colorSurfaceContainerLowest">@color/ctp_crust</item>
+        <item name="colorSurfaceContainerLow">@color/ctp_mantle</item>
+        <item name="colorSurfaceContainer">@color/ctp_mantle</item>
+        <item name="colorSurfaceContainerHigh">@color/ctp_surface0</item>
+        <item name="colorSurfaceContainerHighest">@color/ctp_surface1</item>
+        <item name="colorOutline">@color/ctp_overlay0</item>
+        <item name="colorOutlineVariant">@color/ctp_surface1</item>
+        <item name="android:textColorPrimary">@color/ctp_text</item>
+        <item name="android:textColorSecondary">@color/ctp_subtext0</item>
+        <item name="android:statusBarColor">@color/ctp_base</item>
+        <item name="android:navigationBarColor">@color/ctp_mantle</item>
+        <item name="materialCardViewStyle">@style/Widget.Rotos.Card</item>
+        <item name="textInputStyle">@style/Widget.Material3.TextInputLayout.OutlinedBox</item>
+    </style>
+
+    <style name="Theme.Rotos" parent="Base.Theme.Rotos">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+    </style>
+
+    <style name="Widget.Rotos.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/ctp_mantle</item>
+        <item name="cardCornerRadius">20dp</item>
+        <item name="contentPadding">16dp</item>
+    </style>
+
+    <!-- type scale -->
+    <style name="TextAppearance.Rotos.Brand" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="android:textColor">@color/ctp_mauve</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.12</item>
+    </style>
+    <style name="TextAppearance.Rotos.CardTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textColor">@color/ctp_text</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="TextAppearance.Rotos.Caption" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textColor">@color/ctp_subtext0</item>
+    </style>
+    <style name="TextAppearance.Rotos.StatValue" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:textColor">@color/ctp_text</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+    <style name="TextAppearance.Rotos.BigValue" parent="TextAppearance.Material3.DisplaySmall">
+        <item name="android:textColor">@color/ctp_text</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+    <style name="TextAppearance.Rotos.Mono" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textColor">@color/ctp_subtext0</item>
+    </style>
+
+    <!-- stat blocks: three per row -->
+    <style name="Rotos.Stat" parent="">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+    <style name="Rotos.StatValue" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textAppearance">@style/TextAppearance.Rotos.StatValue</item>
+    </style>
+    <style name="Rotos.StatBig" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textAppearance">@style/TextAppearance.Rotos.BigValue</item>
+        <item name="android:textSize">30sp</item>
+    </style>
+    <style name="Rotos.StatLabel" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textAppearance">@style/TextAppearance.Rotos.Caption</item>
+    </style>
+</resources>

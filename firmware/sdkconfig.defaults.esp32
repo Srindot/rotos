@@ -1,0 +1,14 @@
+# ESP32 DevKit V1 (classic ESP32) on top of sdkconfig.defaults.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Console on UART0 through the board's USB-serial chip (micro-B port).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# BLE only: frees the classic-Bluetooth controller memory.
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
+CONFIG_BTDM_CTRL_MODE_BTDM=n
+
+# Two cores: BLE stays on core 0, the ROTOS draw loop runs on core 1.
+CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=y
