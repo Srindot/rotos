@@ -33,8 +33,8 @@ android {
         applicationId = "dev.rotos.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "2.0-beta"
+        versionCode = 5
+        versionName = "3.0-beta"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         ndk {

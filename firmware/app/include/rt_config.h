@@ -4,7 +4,7 @@
 #ifndef RT_CONFIG_H
 #define RT_CONFIG_H
 
-#define RT_VERSION_TEXT     "V2.0 BETA  SPEED 400"
+#define RT_VERSION_TEXT     "V3.0 BETA  SPEED 400"
 
 #define RT_SCREEN_W         240
 #define RT_SCREEN_H         320
