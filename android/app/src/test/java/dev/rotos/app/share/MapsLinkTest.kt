@@ -21,7 +21,14 @@ class MapsLinkTest {
 
     @Test fun encodedComma() = near(MapsLink.coords("https://www.google.com/maps/search/?api=1&query=17.43%2C78.389"), 17.43, 78.389)
 
-    @Test fun mapCentre() = near(MapsLink.coords("https://www.google.com/maps/@17.4455,78.3489,15z"), 17.4455, 78.3489)
+    @Test fun droppedPin() = near(MapsLink.coords("https://www.google.com/maps/search/17.385044,+78.486671?entry=tts"), 17.385044, 78.486671)
+
+    @Test fun mapCentreIsOnlyTheCentre() {
+        assertNull(MapsLink.coords("https://www.google.com/maps/@17.4455,78.3489,15z"))   // not the place itself
+        near(MapsLink.centre("https://www.google.com/maps/@17.4455,78.3489,15z"), 17.4455, 78.3489)
+        // a search link centred somewhere: its name is the place, the centre only a fallback
+        assertNull(MapsLink.coords("https://www.google.com/maps/place/Inorbit+Mall/@17.43,78.38,14z"))
+    }
 
     @Test fun geoUri() = near(MapsLink.coords("geo:17.36,78.47"), 17.36, 78.47)
 

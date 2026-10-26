@@ -44,11 +44,13 @@ class PlacesClient(private val apiKey: String) {
 
     fun find(query: String, near: LatLon?): Result<Pair<LatLon, String>> = runCatching {
         check(apiKey.isNotBlank()) { "no Google API key" }
-        UsageGuard.acquire(GoogleApi.PLACES, 2).getOrThrow()
+        val day = UsageGuard.acquire(GoogleApi.PLACES, 1).getOrThrow()          // search and details: one each
         val search = Http.post(SEARCH_URL, searchBody(query, near).toByteArray(), "application/json", TIMEOUT_MS,
-            headers("places.id")).getOrThrow()
+            headers("places.id")).onFailure { UsageGuard.refund(GoogleApi.PLACES, 1, day) }.getOrThrow()
         val id = firstId(String(search)) ?: throw IllegalArgumentException("Google found no place called \"$query\"")
-        val details = Http.get(DETAILS_URL.format(id), TIMEOUT_MS, headers("location,formattedAddress")).getOrThrow()
+        val day2 = UsageGuard.acquire(GoogleApi.PLACES, 1).getOrThrow()
+        val details = Http.get(DETAILS_URL.format(id), TIMEOUT_MS, headers("location,formattedAddress"))
+            .onFailure { UsageGuard.refund(GoogleApi.PLACES, 1, day2) }.getOrThrow()
         parseDetails(String(details)) ?: throw IllegalStateException("Google gave no location for \"$query\"")
     }
 

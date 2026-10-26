@@ -28,6 +28,8 @@ typedef struct {
     uint32_t chunks_since_ack;
     uint32_t started_ms;
     uint32_t last_rx_ms;       /* last MAP_BEGIN / MAP_CHUNK (stall timeout) */
+    uint32_t done_len;         /* the last committed pack (a repeated MAP_END gets OK) */
+    uint32_t done_crc;
     uint32_t completed;        /* statistics */
     uint32_t failed;
     RnInflate inf;             /* ~6.5 KB, used by compressed transfers */
@@ -48,6 +50,8 @@ typedef struct {
 void rt_maprx_init(RtMapRx *m);
 /* base / base_len / base_crc: the pack ROTOS holds now (NULL / 0 when none),
  * the base of a patched transfer. */
+/* Drops a transfer in progress (its flash slot goes back to background cleaning). */
+void rt_maprx_cancel(RtMapRx *m);
 RtMapRxReply rt_maprx_begin(RtMapRx *m, const RnMapBegin *b, uint32_t now_ms, const uint8_t *base,
                             uint32_t base_len, uint32_t base_crc);
 RtMapRxReply rt_maprx_chunk(RtMapRx *m, const RnMapChunk *c);

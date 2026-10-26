@@ -20,14 +20,22 @@ object MapsLink {
     private const val TIMEOUT_MS = 4_000                  // resets are instant; do not wait long per try
     private const val MAX_REDIRECTS = 6
     private val URL_RE = Regex("""https?://\S+""")
-    private val COORD_PATTERNS = listOf(
+    /** Where the place itself is. */
+    private val EXACT_PATTERNS = listOf(
         Regex("""!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)"""),
-        Regex("""[?&](?:q|query|destination|daddr|ll|center)=(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)"""),
+        Regex("""[?&](?:q|query|destination|daddr)=(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)"""),
         Regex("""/dir/[^/]*/(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)"""),
-        Regex("""@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)"""),
+        Regex("""/maps/search/(-?\d{1,2}\.\d+),[\s+]*(-?\d{1,3}\.\d+)"""),     // a dropped pin
         Regex("""^geo:(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)"""),
     )
-    private val PLACE_RE = Regex("""/maps/place/([^/@?]+)""")
+    /** Only where the sharer's map was centred: a last resort, after the place's name. */
+    private val CENTRE_PATTERNS = listOf(
+        Regex("""[?&](?:ll|center)=(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)"""),
+        Regex("""@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)"""),
+    )
+    private val PLACE_RE = Regex("""/maps/(?:place|search)/([^/@?]+)""")
+    /** ?q=Charminar,+Hyderabad (not coordinates: those are [coords]). */
+    private val QUERY_RE = Regex("""[?&](?:q|query)=([^&]+)""")
     private const val EXPAND_TRIES = 8
     private const val EXPAND_PAUSE_MS = 150L
 
@@ -39,10 +47,15 @@ object MapsLink {
     fun label(text: String): String? = text.lines().map { it.trim() }
         .firstOrNull { it.isNotEmpty() && !URL_RE.containsMatchIn(it) && !it.startsWith("geo:") }
 
-    /** Pure: coordinates written in a (decoded) URL or geo: URI, else null. */
-    fun coords(url: String): LatLon? {
+    /** Pure: the place's exact coordinates written in a (decoded) URL or geo: URI, else null. */
+    fun coords(url: String): LatLon? = find(url, EXACT_PATTERNS)
+
+    /** Pure: the map centre of the link ("@lat,lon", ll=, center=): near the place, not the place. */
+    fun centre(url: String): LatLon? = find(url, CENTRE_PATTERNS)
+
+    private fun find(url: String, patterns: List<Regex>): LatLon? {
         val u = decode(url)
-        for (re in COORD_PATTERNS) {
+        for (re in patterns) {
             val m = re.find(u) ?: continue
             val lat = m.groupValues[1].toDoubleOrNull() ?: continue
             val lon = m.groupValues[2].toDoubleOrNull() ?: continue
@@ -55,6 +68,10 @@ object MapsLink {
     fun query(url: String): String? {
         val u = decode(url)
         PLACE_RE.find(u)?.let { return it.groupValues[1].replace('+', ' ').trim().ifEmpty { null } }
+        if (!u.startsWith("geo:")) {
+            QUERY_RE.find(u)?.groupValues?.get(1)?.replace('+', ' ')?.trim()
+                ?.takeIf { it.isNotEmpty() && coords("?q=$it") == null }?.let { return it }
+        }
         if (u.startsWith("geo:")) {
             val q = u.substringAfter("?q=", "").substringBefore('&').replace('+', ' ').trim()
             return q.substringBefore('(').trim().ifEmpty { null }

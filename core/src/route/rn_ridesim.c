@@ -118,7 +118,14 @@ bool rn_ridesim_step(RnRideSim *sim, const RnRoute *r, float dt)
         sim->dwell -= dt;
     } else {
         sim->v = fminf(sim->v + RN_SIM_ACCEL * dt, speed_limit(sim, r));
-        sim->s += sim->v * dt;
+        float next = sim->s + sim->v * dt;
+        for (uint32_t i = 0u; i < sim->n_stops; i++) {   /* never step over a red light, whatever dt */
+            const RnSimStop *st = &sim->stops[i];
+            if (!st->used && st->speed_mps == 0.0f && st->along_m >= sim->s && st->along_m < next) {
+                next = st->along_m;
+            }
+        }
+        sim->s = next;
         snap_to_stop(sim);
         if (sim->s >= r->total_m) {
             sim->s = r->total_m;

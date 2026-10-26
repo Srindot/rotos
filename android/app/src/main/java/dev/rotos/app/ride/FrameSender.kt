@@ -108,7 +108,13 @@ class FrameSender(val link: RotosLink) {
         link.send(build(seq.next())).onSuccess { markSent() }
     }
 
-    private suspend fun frame(build: (ByteArray) -> Int) = seq.order.withLock {
+    /**
+     * A frame built by the C library. Not under [SeqCounter.order]: NavThread
+     * may be busy with a map block for a while, and position frames must not
+     * wait behind it (ROTOS does not need frames in sequence order; the
+     * counter is atomic, the map transfer keeps its own order).
+     */
+    private suspend fun frame(build: (ByteArray) -> Int) {
         val buf = ByteArray(NativeNav.MAX_FRAME)
         val n = NavThread.run { build(buf) }
         if (n > 0) link.send(buf.copyOf(n)).onSuccess { markSent() }

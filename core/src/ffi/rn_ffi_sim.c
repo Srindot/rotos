@@ -20,6 +20,9 @@ int32_t rn_ffi_sim_step(float dt)
     if (!RN_ASSERT(dt > 0.0f) || !c->sim_ok) {
         return RN_ERR_STATE;
     }
+    if (dt > 1.0f) {
+        return RN_ERR_PARAM;                          /* not "ride finished" (0) */
+    }
     return rn_ridesim_step(&c->sim, &c->route, dt) ? 1 : 0;
 }
 

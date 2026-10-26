@@ -29,7 +29,7 @@ sequence numbers.
 
 | Type | Name | Direction | When | Payload |
 |---|---|---|---|---|
-| 0x01 | NAV_STATE | phone → ROTOS | 1 Hz while riding | 38 B: t_ms, route_id, lat/lon ×1e7, speed cm/s, heading 0.01°, along m, remaining m, remaining s, ETA (local s of day), flags, accuracy m |
+| 0x01 | NAV_STATE | phone → ROTOS | 1 Hz while riding | 38 B: t_ms, route_id, lat/lon ×1e7, speed cm/s, heading 0.01°, along m, remaining m, remaining s (0 in Google Maps mode: ROTOS works out time left from the ETA), ETA (local s of day; 0 = unknown), flags (0x04 = Google Maps / the phone is rerouting), accuracy m |
 | 0x02 | PHONE_STATUS | phone → ROTOS | every 5 s | 14 B: t_ms, local time of day, weekday, day, month, battery %, flags (0x01 charging, 0x02 night, 0x04 Google usage near its cap: ROTOS shows G!), signal bars 0-4 |
 | 0x03 | WEATHER | phone → ROTOS | every 10 min | 10 B: t_ms, temp ×10 °C, WMO code, rain %, wind km/h, is_day |
 | 0x04 | SETTINGS | phone → ROTOS | on change | 4 B: theme mode (0 auto, 1 day, 2 night), north-up, glass %, brightness % (0 = auto) |
@@ -62,7 +62,7 @@ leaves "waiting for phone" at once and shows the progress in its footer panel
 transfer starts, or 10 s after the last PREP_STATUS. First planning in a new
 area downloads Google map tiles and takes a little longer.
 
-Link drop-outs: the app reconnects by itself (backoff 1 to 8 s) and carries on
+Link drop-outs: the app reconnects by itself (backoff 1 to 4 s between 15 s scans, 30 s and low-power scans once ROTOS has been away ~10 min) and carries on
 sending NAV_STATE. ROTOS keeps the map pack in flash, so a reconnect, or a
 ROTOS power cycle, resumes the ride without a new map transfer. A transfer that
 was interrupted is restarted after the reconnect.

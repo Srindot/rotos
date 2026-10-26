@@ -13,16 +13,20 @@ object GoogleRouteParser {
         val root = JSONObject(json)
         val routes = root.optJSONArray("routes")
         require(routes != null && routes.length() > 0) { "no routes in response" }
-        (0 until routes.length()).mapNotNull { routeOf(routes.getJSONObject(it), source).getOrNull() }
-            .also { require(it.isNotEmpty()) { "no usable route" } }
+        // Google's main route first: if it cannot be used (too long), say why - never swap in an alternative quietly
+        val main = routeOf(routes.getJSONObject(0), source).getOrThrow()
+        listOf(main) + (1 until routes.length()).mapNotNull { routeOf(routes.getJSONObject(it), source).getOrNull() }
     }
 
     private fun routeOf(r: JSONObject, source: String): Result<Route> = runCatching {
         val steps = ArrayList<RouteStep>()
         val legs = r.optJSONArray("legs") ?: throw IllegalArgumentException("route has no legs")
-        for (li in 0 until minOf(legs.length(), MAX_STEPS)) {
+        val total = (0 until legs.length()).sumOf { legs.getJSONObject(it).optJSONArray("steps")?.length() ?: 0 }
+        // a cut route would end its line early while its distance / time describe all of it
+        require(total <= MAX_STEPS) { "route too long for ROTOS: $total steps (at most $MAX_STEPS)" }
+        for (li in 0 until legs.length()) {
             val ls = legs.getJSONObject(li).optJSONArray("steps") ?: continue
-            for (si in 0 until minOf(ls.length(), MAX_STEPS - steps.size)) {
+            for (si in 0 until ls.length()) {
                 stepOf(ls.getJSONObject(si))?.let { steps.add(it) }
             }
         }

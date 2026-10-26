@@ -79,6 +79,20 @@ rn_status rn_pack_open(RnPack *p, const uint8_t *blob, uint32_t len)
     p->blob = blob;
     p->len = len;
     p->h = h;
+    float prev = -1.0f;                               /* NaN would reach the camera; the searches */
+    bool ok = true;                                   /* need non-decreasing along                */
+    for (uint32_t i = 0u; i < h.n_points && i < RN_MAX_ROUTE_PTS && ok; i++) {
+        RnPackPoint pt = rn_pack_point(p, i);
+        ok = isfinite(pt.x) && isfinite(pt.y) && isfinite(pt.along) && pt.along >= prev;
+        prev = pt.along;
+    }
+    for (uint32_t i = 0u; i < h.n_maneuvers && i < RN_MAX_MANEUVERS && ok; i++) {
+        ok = isfinite(rn_pack_maneuver_along(p, i));
+    }
+    if (!ok) {
+        (void)memset(p, 0, sizeof *p);
+        return RN_ERR_FORMAT;
+    }
     return RN_OK;
 }
 

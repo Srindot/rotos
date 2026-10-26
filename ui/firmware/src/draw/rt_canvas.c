@@ -159,9 +159,56 @@ static bool line_visible(float x0, float y0, float x1, float y1, int32_t r)
              fmaxf(y0, y1) < -fr || fminf(y0, y1) > (float)RT_SCREEN_H + fr);
 }
 
+/* Liang-Barsky: clip one parameter bound; false when the segment misses. */
+static bool clip_edge(float p, float q, float *t0, float *t1)
+{
+    if (p == 0.0f) {
+        return q >= 0.0f;
+    }
+    float t = q / p;
+    if (p < 0.0f) {
+        if (t > *t1) {
+            return false;
+        }
+        *t0 = (t > *t0) ? t : *t0;
+    } else {
+        if (t < *t0) {
+            return false;
+        }
+        *t1 = (t < *t1) ? t : *t1;
+    }
+    return true;
+}
+
+/* Clips the segment to the screen plus margin m, so a segment ending km
+ * off screen (long straight roads) is drawn over its visible part. */
+static bool clip_segment(float *x0, float *y0, float *x1, float *y1, float m)
+{
+    float dx = *x1 - *x0;
+    float dy = *y1 - *y0;
+    float t0 = 0.0f;
+    float t1 = 1.0f;
+    bool in = clip_edge(-dx, *x0 + m, &t0, &t1) && clip_edge(dx, (float)RT_SCREEN_W + m - *x0, &t0, &t1) &&
+              clip_edge(-dy, *y0 + m, &t0, &t1) && clip_edge(dy, (float)RT_SCREEN_H + m - *y0, &t0, &t1);
+    if (!in) {
+        return false;
+    }
+    float ax = *x0;
+    float ay = *y0;
+    *x0 = ax + t0 * dx;
+    *y0 = ay + t0 * dy;
+    *x1 = ax + t1 * dx;
+    *y1 = ay + t1 * dy;
+    return true;
+}
+
 void rt_canvas_thick_line(RtCanvas *cv, float x0, float y0, float x1, float y1, int32_t r, uint8_t c)
 {
     if (!RN_ASSERT(cv != NULL) || !RN_ASSERT(r >= 0 && r <= 8) || !line_visible(x0, y0, x1, y1, r)) {
+        return;
+    }
+    if (!(isfinite(x0) && isfinite(y0) && isfinite(x1) && isfinite(y1)) ||
+        !clip_segment(&x0, &y0, &x1, &y1, (float)r + 2.0f)) {
         return;
     }
     int32_t ax = (int32_t)lroundf(x0), ay = (int32_t)lroundf(y0);

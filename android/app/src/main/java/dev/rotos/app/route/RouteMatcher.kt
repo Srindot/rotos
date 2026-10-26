@@ -68,5 +68,7 @@ object RoadNames {
     }
 
     /** "Turn left onto W Jubilee Hills Rd" -> "W Jubilee Hills Rd". */
-    fun ofInstruction(instruction: String): String = ROAD.find(instruction)?.groupValues?.get(1)?.trim() ?: ""
+    /** The road in a step instruction's first line ("...Rd\nDestination will be on the right"). */
+    fun ofInstruction(instruction: String): String =
+        ROAD.find(instruction.lineSequence().firstOrNull().orEmpty())?.groupValues?.get(1)?.trim() ?: ""
 }

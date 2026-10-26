@@ -52,7 +52,10 @@ uint32_t rn_text_ascii_upper(char *dst, uint32_t cap, const char *src)
             pending_space = (n > 0u);
             continue;
         }
-        if (pending_space && n + 2u < cap) {
+        if (pending_space) {
+            if (n + 2u >= cap) {
+                break;                                /* no room for " X": never glue two words */
+            }
             dst[n] = ' ';
             n++;
         }
@@ -92,6 +95,12 @@ uint32_t rn_text_road_from_instruction(char *dst, uint32_t cap, const char *inst
         return 0u;
     }
     uint32_t len = bounded_len(instruction, TEXT_SCAN_MAX);
+    for (uint32_t i = 0u; i < len; i++) {              /* "...Rd\nDestination will be on the right" */
+        if ((unsigned char)instruction[i] < 0x20u) {
+            len = i;
+            break;
+        }
+    }
     int32_t at = find_word(instruction, len, "onto");
     if (at < 0) {
         at = find_word(instruction, len, "on");
@@ -109,8 +118,16 @@ uint32_t rn_text_road_from_instruction(char *dst, uint32_t cap, const char *inst
     uint32_t n = 0u;
     const char *rest = &instruction[at];
     uint32_t rest_len = len - (uint32_t)at;
+    /* drop " toward(s) ..." (en-IN / en-GB say "towards") */
     int32_t cut = find_word(rest, rest_len, "toward");
-    uint32_t end = (cut > 0) ? (uint32_t)cut - 7u : rest_len;   /* drop " toward" */
+    int32_t cut_s = find_word(rest, rest_len, "towards");
+    uint32_t end = rest_len;
+    if (cut > 7) {                                    /* text before " toward": not "Toward Lane" */
+        end = (uint32_t)cut - 7u;
+    }
+    if (cut_s > 8 && (uint32_t)cut_s - 8u < end) {
+        end = (uint32_t)cut_s - 8u;
+    }
     while (n < end && n + 1u < (uint32_t)sizeof tmp) {
         tmp[n] = rest[n];
         n++;

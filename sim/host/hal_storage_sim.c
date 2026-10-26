@@ -99,6 +99,15 @@ bool hal_storage_map_write(uint32_t offset, const uint8_t *bytes, uint32_t n)
     return true;
 }
 
+bool hal_storage_map_read(uint32_t offset, uint8_t *out, uint32_t n)
+{
+    if (out == NULL || s_writing == NO_WRITE || offset + n > s_writing) {
+        return false;
+    }
+    (void)memcpy(out, &s_area[s_new_slot * slot_size() + offset], n);
+    return true;
+}
+
 bool hal_storage_map_commit(uint32_t len)
 {
     if (s_writing == NO_WRITE || len != s_writing) {

@@ -12,7 +12,7 @@ data class TransferProgress(val acked: Int, val total: Int, val resends: Int)
 
 /**
  * Sliding-window upload of the current map pack (docs/PROTOCOL.md "Map transfer"):
- *   MAP_BEGIN -> wait up to 10 s for ACK(MAP_BEGIN, OK)
+ *   MAP_BEGIN -> wait up to 20 s for ACK(MAP_BEGIN, OK) (ROTOS may erase flash first)
  *   MAP_CHUNKs, never more than 16 chunks beyond the last acknowledged byte count
  *   ACK(MAP_CHUNK, OK, value) advances the window; BAD_STATE resumes from value
  *   3 s without progress -> resend from the last acknowledged value
@@ -57,7 +57,7 @@ class MapTransfer(
         for (i in 0 until 1024) if (acks.tryReceive().isFailure) break    // drop stale ACKs
         if (total <= 0) return fail("no map pack to send")
         sendFrame { NativeNav.frameMapBegin(seq.next(), it) }.onFailure { return Result.failure(it) }
-        val begin = awaitAck(Packets.MAP_BEGIN, BEGIN_TIMEOUT_MS) ?: return fail("no ACK for MAP_BEGIN in 10 s")
+        val begin = awaitAck(Packets.MAP_BEGIN, BEGIN_TIMEOUT_MS) ?: return fail("no ACK for MAP_BEGIN in ${BEGIN_TIMEOUT_MS / 1000} s")
         if (begin.status == Packets.ACK_HAVE) {                            // ROTOS already has this exact map
             progress(TransferProgress(total, total, 0))
             return Result.success(Unit)

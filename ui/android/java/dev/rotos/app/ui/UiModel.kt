@@ -104,7 +104,8 @@ data class UiModel(
                 Packets.PREP_BRIDGES -> Progress("Checking flyovers", "Road names along the route", b.pct)
                 Packets.PREP_MAP -> Progress(
                     "Building the map for ROTOS",
-                    "Block ${b.done} of ${b.total}" + if (b.tiles > 0) " · downloading ${b.tiles} new map tiles (saved for next time)" else "",
+                    if (b.stage.startsWith("downloading")) "Downloading ${b.done} of ${b.total} new map tiles (saved for next time)"
+                    else "Block ${b.done} of ${b.total}",
                     b.pct,
                 )
                 else -> Progress("Map ready", "", 100)

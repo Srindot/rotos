@@ -25,12 +25,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class ReconnectingLink(
     private val scope: CoroutineScope,
-    private val factory: () -> RotosLink,
+    /** A fresh link; its argument: failed attempts in a row (BLE scans gentler when ROTOS stays away). */
+    private val factory: (Int) -> RotosLink,
     private val onEvent: (String) -> Unit,
     private val onReconnected: suspend () -> Unit,
 ) : RotosLink {
     companion object {
         private val BACKOFF_MS = longArrayOf(1_000, 2_000, 3_000, 4_000)     // + a 15 s scan: under Android's 5 scans / 30 s
+        /** After this many tries (~10 min: the bike is parked) wait longer between scans: battery. */
+        private const val PARKED_TRIES = 30
+        private const val PARKED_BACKOFF_MS = 30_000L
         const val WAIT_CONNECTED_MS = 60_000L
     }
 
@@ -54,20 +58,24 @@ class ReconnectingLink(
         return r
     }
 
+    @Volatile private var misses = 0
+
     private suspend fun attach(): Result<Unit> {
-        val l = factory()
+        val l = factory(misses)
         val r = l.connect()
         if (r.isFailure) {
+            misses++
             l.close()
             return r
         }
+        misses = 0
         inner = l
+        _state.value = LinkState.CONNECTED                   // before the watch: a drop it sees at once wins
         pump = scope.launch { l.incoming.collect { _incoming.emit(it) } }
         watch = scope.launch {
             l.state.first { it == LinkState.DISCONNECTED || it == LinkState.FAILED }
             if (!closed) dropped(l)
         }
-        _state.value = LinkState.CONNECTED
         return r
     }
 
@@ -80,7 +88,7 @@ class ReconnectingLink(
         retry = scope.launch {
             var n = 0
             while (isActive && !closed) {
-                delay(BACKOFF_MS[minOf(n, BACKOFF_MS.size - 1)])
+                delay(if (n >= PARKED_TRIES) PARKED_BACKOFF_MS else BACKOFF_MS[minOf(n, BACKOFF_MS.size - 1)])
                 n++
                 val r = try { attach() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
                 if (r.isSuccess) {

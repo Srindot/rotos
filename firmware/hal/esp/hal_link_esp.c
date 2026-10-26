@@ -46,12 +46,15 @@ static int gatt_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return BLE_ATT_ERR_UNLIKELY;
     }
-    uint8_t tmp[512];
+    uint8_t tmp[512];                                /* the ATT maximum; the phone writes at most this */
     uint16_t n = 0u;
-    if (ble_hs_mbuf_to_flat(ctxt->om, tmp, sizeof tmp, &n) != 0) {
+    if (OS_MBUF_PKTLEN(ctxt->om) > sizeof tmp ||     /* to_flat would cut it short silently */
+        ble_hs_mbuf_to_flat(ctxt->om, tmp, sizeof tmp, &n) != 0) {
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
-    (void)xStreamBufferSend(s_rx, tmp, n, 0);       /* full: drop, protocol recovers */
+    if (xStreamBufferSpacesAvailable(s_rx) >= n) {   /* whole writes only: never half a frame */
+        (void)xStreamBufferSend(s_rx, tmp, n, 0);
+    }
     return 0;
 }
 

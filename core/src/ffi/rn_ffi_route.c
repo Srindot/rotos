@@ -33,7 +33,8 @@ void rn_ffi_reset(void)
     c->sim_ok = false;
     rn_engine_init(&c->engine);
     rn_tile_cache_init(&c->cache);
-    rn_ffi_rx_reset();
+    /* not the inbound link parser: a route load mid-ride must not drop a ROTOS frame that is
+     * half received (the link resets it itself on (re)connect) */
 }
 
 uint32_t rn_ffi_assert_count(void)
@@ -51,14 +52,17 @@ int32_t rn_ffi_route_add_polyline(const char *encoded)
     if (n <= 0) {
         return (n == 0) ? RN_ERR_FORMAT : n;
     }
-    uint32_t have = c->route.n_pts;
-    bool shared = have > 0u && c->route.pts[have - 1u].lat == c->scratch_lat[0] &&
-                  c->route.pts[have - 1u].lon == c->scratch_lon[0];
-    int32_t first = shared ? (int32_t)have - 1 : (int32_t)have;
+    /* The step starts at its first point - or, when rn_route_add_point dropped
+     * it (within RN_ROUTE_MIN_STEP_M of the last stored point), at that point. */
+    int32_t first = -1;
     for (int32_t i = 0; i < n; i++) {
+        uint32_t before = c->route.n_pts;
         rn_status st = rn_route_add_point(&c->route, c->scratch_lat[i], c->scratch_lon[i]);
         if (st != RN_OK) {
             return st;
+        }
+        if (i == 0) {
+            first = (c->route.n_pts > before) ? (int32_t)before : (int32_t)before - 1;
         }
     }
     return first;

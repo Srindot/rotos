@@ -48,8 +48,19 @@ RnProjection rn_matcher_project(const RnRoute *r, uint32_t seg, RnVec2 p,
     return out;
 }
 
-/* Best projection over segments overlapping [lo, hi] metres. */
-static RnProjection search(const RnRoute *r, float lo, float hi, const RnMatchInput *in)
+/* Acquiring: candidates whose cost is within this of the best one are
+ * equally good (start and end of a loop, the same street passed twice); of
+ * those, the one nearest along the route to where the rider should be wins.
+ * Anything clearly nearer the rider always wins. */
+#define ACQUIRE_TIE_M 15.0f
+/* ... but only a separate pass of the route counts as a tie, never the
+ * neighbouring segments of the same street (they would pull the match off
+ * the rider's position along it). */
+#define ACQUIRE_PASS_M 60.0f
+
+/* Best projection over segments overlapping [lo, hi] metres; with pref >= 0,
+ * near-ties are broken by distance along the route from pref. */
+static RnProjection search(const RnRoute *r, float lo, float hi, const RnMatchInput *in, float pref)
 {
     bool use_heading = in->heading_valid && in->speed_mps >= HEADING_MIN_MPS;
     RnProjection best = {1e9f, 0.0f, 1e9f};
@@ -63,7 +74,22 @@ static RnProjection search(const RnRoute *r, float lo, float hi, const RnMatchIn
             best = pr;
         }
     }
-    return best;
+    if (pref < 0.0f || best.cost >= 1e9f) {
+        return best;
+    }
+    RnProjection pick = best;                         /* second pass: the near-ties */
+    for (uint32_t i = first; i + 1u < r->n_pts && i < RN_MAX_ROUTE_PTS; i++) {
+        if (r->pts[i].along_m > hi) {
+            break;
+        }
+        RnProjection pr = rn_matcher_project(r, i, in->pos, in->heading_deg, use_heading);
+        bool other_pass = fabsf(pr.along_m - best.along_m) > ACQUIRE_PASS_M;
+        if (other_pass && pr.cost <= best.cost + ACQUIRE_TIE_M &&
+            fabsf(pr.along_m - pref) < fabsf(pick.along_m - pref)) {
+            pick = pr;
+        }
+    }
+    return pick;
 }
 
 static void update_hysteresis(RnMatcher *m, float off_limit)
@@ -98,10 +124,12 @@ rn_status rn_matcher_update(RnMatcher *m, const RnRoute *r, const RnMatchInput *
     float off_limit = fmaxf(RN_MATCH_OFF_M, 2.0f * in->accuracy_m);
     RnProjection best;
     if (!m->locked || m->off_route) {
-        best = search(r, 0.0f, r->total_m, in);          /* (re)acquire */
+        best = search(r, 0.0f, r->total_m, in, m->locked ? m->along_m : 0.0f);   /* (re)acquire */
         bool accept = best.dist_m < (m->locked ? off_limit * 0.6f : RN_MATCH_LOCK_M);
         if (!accept) {
-            m->cross_m = best.dist_m;
+            /* a rejected re-lock is a bad fix, never a good one: else OFF ROUTE clears with a
+             * stale position, flickers, and the reroute timer never runs out */
+            m->cross_m = fmaxf(best.dist_m, off_limit + 1.0f);
             update_hysteresis(m, off_limit);
             m->last_t_ms = in->t_ms;
             return RN_OK;                                 /* keep last along */
@@ -110,7 +138,13 @@ rn_status rn_matcher_update(RnMatcher *m, const RnRoute *r, const RnMatchInput *
         float dt = (float)(in->t_ms - m->last_t_ms) * 0.001f;
         dt = (dt < 0.0f) ? 0.0f : ((dt > MAX_GAP_S) ? MAX_GAP_S : dt);
         float ahead = fmaxf(RN_MATCH_AHEAD_MIN_M, in->speed_mps * dt * 2.5f + 40.0f);
-        best = search(r, m->along_m - RN_MATCH_BACK_M, m->along_m + ahead, in);
+        best = search(r, m->along_m - RN_MATCH_BACK_M, m->along_m + ahead, in, -1.0f);
+        if (best.dist_m > off_limit) {                /* a stray fix: count it, keep the position */
+            m->cross_m = best.dist_m;
+            m->last_t_ms = in->t_ms;
+            update_hysteresis(m, off_limit);
+            return RN_OK;
+        }
     }
     m->locked = true;
     m->cross_m = best.dist_m;

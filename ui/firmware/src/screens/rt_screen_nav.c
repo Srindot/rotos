@@ -117,7 +117,12 @@ static void draw_bottom(RtCanvas *cv, const RtTheme *t, const RtHudData *d)
     (void)rt_text_centered(cv, 36, 297, "KM/H", 1, RT_C_TEXT_DIM, false);
     time_left(d, v, sizeof v, &label);
     column(cv, 94, v, label);
-    rt_fmt_hhmm(d->eta_s, buf, sizeof buf);
+    if (d->eta_s == 0u) {                                     /* 0 = unknown (PROTOCOL.md) */
+        buf[0] = '\0';
+        (void)rt_fmt_cat(buf, sizeof buf, "--:--");
+    } else {
+        rt_fmt_hhmm(d->eta_s, buf, sizeof buf);
+    }
     column(cv, 150, buf, "ETA");
     rt_fmt_distance(d->remaining_m, v, u);
     buf[0] = '\0';

@@ -26,8 +26,12 @@ object RideNotifications {
     private const val TIP_ID = 2
     private const val TIP_TIMEOUT_MS = 120_000L
 
-    /** Keeps [service] in the foreground with [text] as its status line. */
-    fun foreground(service: Service, text: String) {
+    /**
+     * Keeps [service] in the foreground with [text] as its status line.
+     * Returns false when the location type was refused (started in the
+     * background): GPS then needs the app opened once.
+     */
+    fun foreground(service: Service, text: String): Boolean {
         val nm = service.getSystemService(NotificationManager::class.java)
         nm?.createNotificationChannel(NotificationChannel(CHANNEL, "Ride", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(service, 0, Intent(service, MainActivity::class.java),
@@ -41,13 +45,24 @@ object RideNotifications {
             .build()
         if (Build.VERSION.SDK_INT < 29) {
             service.startForeground(NOTIFY_ID, n)
-            return
+            return true
         }
         // Restarted in the background (after a kill / an update) Android may refuse the
         // location type: stay connected to ROTOS anyway, location follows when allowed.
-        runCatching { service.startForeground(NOTIFY_ID, n, foregroundTypes(service)) }
-            .recoverCatching { service.startForeground(NOTIFY_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) }
+        val types = foregroundTypes(service)
+        if (runCatching { service.startForeground(NOTIFY_ID, n, types) }.isSuccess) {
+            return types and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION != 0
+        }
+        val gps = NotificationCompat.Builder(service, CHANNEL)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle("ROTOS")
+            .setContentText("$text · open ROTOS to restore GPS")
+            .setContentIntent(open)
+            .setOngoing(true)
+            .build()
+        runCatching { service.startForeground(NOTIFY_ID, gps, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) }
             .onFailure { AppLog.i("foreground refused: ${it.message}") }
+        return false
     }
 
     /** Google navigates but ROTOS does not know where to: suggest the share for the blue line. */

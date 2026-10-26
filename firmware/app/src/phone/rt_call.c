@@ -46,6 +46,9 @@ void rt_call_on_state(RtCall *c, const RnCallState *s, uint32_t now_ms)
         on_ringing(c, s, now_ms);
         return;
     }
+    if (c->dismissed && c->dismissed_id == s->call_id) {
+        c->dismissed = false;                    /* that call is over: a later one may reuse its id */
+    }
     bool ours = c->ui != (uint8_t)RT_CALL_HIDDEN && c->call.call_id == s->call_id;
     bool replied = (s->flags & RN_CALL_F_REPLIED) != 0u;
     if (ours && replied && s->state == RN_CALL_IDLE) {
@@ -69,6 +72,9 @@ void rt_call_update(RtCall *c, uint32_t now_ms)
     }
     if (c->ui == (uint8_t)RT_CALL_DONE && now_ms - c->since_ms > RT_CALL_DONE_MS) {
         enter(c, RT_CALL_HIDDEN, now_ms);
+    }
+    if (c->dismissed && now_ms - c->rx_ms > RT_CALL_SILENCE_MS) {
+        c->dismissed = false;                    /* no word of that call any more: a reused id shows */
     }
 }
 

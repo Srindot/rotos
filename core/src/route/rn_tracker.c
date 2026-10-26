@@ -133,7 +133,9 @@ void rn_tracker_update(RnTracker *t, const RnPack *pack, uint32_t now_ms)
         return;
     }
     t->free = false;
-    float pred = fminf(t->last.along_m + t->last.speed_mps * age, pack->h.total_m);
+    /* off route the engine holds along: no running ahead of it (the marker would jump back each fix) */
+    float v = ((t->last.flags & RN_NAV_OFF_ROUTE) != 0u) ? 0.0f : t->last.speed_mps;
+    float pred = fminf(t->last.along_m + v * age, pack->h.total_m);
     update_along(t, pred, dt);
     update_heading(t, pack, dt);
 }

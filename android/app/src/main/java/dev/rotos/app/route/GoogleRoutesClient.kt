@@ -36,9 +36,10 @@ class GoogleRoutesClient(private val apiKey: String) {
     /** Google's two-wheeler route and its alternatives (one billed call, if the caps allow it). */
     fun routes(from: LatLon, to: LatLon, purpose: Purpose = Purpose.USER): Result<List<Route>> {
         if (apiKey.isBlank()) return Result.failure(IllegalStateException("no Google API key"))
-        UsageGuard.acquire(GoogleApi.ROUTES, 1, purpose).onFailure { return Result.failure(it) }
+        val day = UsageGuard.acquire(GoogleApi.ROUTES, 1, purpose).getOrElse { return Result.failure(it) }
         val headers = mapOf("X-Goog-Api-Key" to apiKey, "X-Goog-FieldMask" to FIELD_MASK) + AppIdentity.googleHeaders()
         return Http.post(URL, requestBody(from, to).toByteArray(), "application/json", TIMEOUT_MS, headers)
+            .onFailure { UsageGuard.refund(GoogleApi.ROUTES, 1, day) }          // never answered: not billed
             .mapCatching { GoogleRouteParser.parseAll(String(it), "google").getOrThrow() }
     }
 }

@@ -14,6 +14,7 @@ static void test_polyline(void)
     /* Google's documented example */
     double lat[8];
     double lon[8];
+    CHECK(rn_polyline_decode("_qxeO?_qxeO?", lat, lon, 8u) == RN_ERR_FORMAT);   /* 85 + 85 degrees */
     int32_t n = rn_polyline_decode("_p~iF~ps|U_ulLnnqC_mqNvxq`@", lat, lon, 8u);
     CHECK(n == 3);
     CHECK_NEAR(lat[0], 38.5, 1e-9);
@@ -51,6 +52,12 @@ static void test_text(void)
     CHECK(strcmp(road, "OLD MUMBAI HWY") == 0);
     rn_text_road_from_instruction(road, sizeof road, "Head north on Gachibowli Rd toward Road No. 2");
     CHECK(strcmp(road, "GACHIBOWLI RD") == 0);
+    rn_text_road_from_instruction(road, sizeof road, "Head north on MG Road towards Main St");   /* en-IN */
+    CHECK(strcmp(road, "MG ROAD") == 0);
+    rn_text_road_from_instruction(road, sizeof road, "Turn left onto Brigade Rd\nDestination will be on the right");
+    CHECK(strcmp(road, "BRIGADE RD") == 0);
+    rn_text_road_from_instruction(road, sizeof road, "Turn left onto Toward Lane");
+    CHECK(strcmp(road, "TOWARD LANE") == 0);
     rn_text_road_from_instruction(road, sizeof road, "Continue straight");
     CHECK(road[0] == '\0');
     rn_text_ascii_upper(road, 8u, "  ab\xc3\xa9  cd efgh");

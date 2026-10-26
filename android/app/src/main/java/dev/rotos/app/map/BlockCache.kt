@@ -23,26 +23,56 @@ class BlockCache(filesDir: File) {
         /** ~8 KB each: ~40 MB at most (a few hundred km of routes). */
         const val MAX_BLOCKS = 5_000
         private const val OUT = MapPackBuilder.OUT
+        private const val UPKEEP_MS = 3_600_000L
+        /** Never pruned: blocks used this recently (a build may have just chosen them). */
+        private const val KEEP_RECENT_MS = 3_600_000L
+        private val LOCKS = Array(64) { Any() }
+        private val shared = java.util.concurrent.ConcurrentHashMap<String, BlockCache>()
+
+        /** The app's one cache for [filesDir] (builds and warming share its upkeep). */
+        fun of(filesDir: File): BlockCache = shared.getOrPut(filesDir.absolutePath) { BlockCache(filesDir) }
     }
+
+    @Volatile private var upkeptMs = 0L
 
     private val dir = File(filesDir, "mapblocks/v${GoogleTiles.STYLE_VERSION}.$CONVERTER_VERSION")
 
-    init {
-        dir.mkdirs()
-        prune()
+    /** Folder and pruning, at most hourly (a disk walk: callers are on Dispatchers.IO, never the UI thread). */
+    private val ready: Boolean
+        get() {
+            val now = System.currentTimeMillis()
+            if (now - upkeptMs >= UPKEEP_MS) {
+                synchronized(this) {
+                    if (now - upkeptMs >= UPKEEP_MS) {
+                        dir.mkdirs()
+                        prune(now)
+                        upkeptMs = now
+                    }
+                }
+            }
+            return true
+        }
+
+    private fun touch(f: File) {
+        val now = System.currentTimeMillis()
+        if (now - f.lastModified() > KEEP_RECENT_MS / 2) f.setLastModified(now)   // used: pruning keeps it this hour
     }
 
     private fun file(gx: Int, gy: Int) = File(dir, "${gx}_$gy.cls")
 
     /** The block's cell mask (0 when not saved). Reads 8 bytes only. */
     fun mask(gx: Int, gy: Int): Long = runCatching {
-        DataInputStream(file(gx, gy).inputStream()).use { it.readLong() }
+        check(ready)
+        val f = file(gx, gy)
+        DataInputStream(f.inputStream()).use { it.readLong() }.also { touch(f) }   // chosen for a map: keep it
     }.getOrDefault(0L)
 
     /** The block's classes if its right cells cover [need], else null. */
     fun get(gx: Int, gy: Int, need: Long): ByteArray? = runCatching {
+        check(ready)
         val f = file(gx, gy)
         if (!f.isFile) return null
+        touch(f)
         val bytes = f.readBytes()
         val mask = DataInputStream(bytes.inputStream()).use { it.readLong() }
         if (mask and need != need) return null
@@ -51,7 +81,12 @@ class BlockCache(filesDir: File) {
 
     /** Saves [classes] whose [right] cells are valid, keeping cells an earlier save had right. */
     fun put(gx: Int, gy: Int, classes: ByteArray, right: Long) {
-        if (right == 0L || classes.size != OUT * OUT) return
+        if (right == 0L || classes.size != OUT * OUT || !ready) return
+        synchronized(LOCKS[Math.floorMod(gx * 31 + gy, LOCKS.size)]) { merge(gx, gy, classes, right) }
+    }
+
+    /** put's read-merge-write, one writer per block at a time. */
+    private fun merge(gx: Int, gy: Int, classes: ByteArray, right: Long) {
         runCatching {
             val old = file(gx, gy).takeIf { it.isFile }?.readBytes()
             val oldMask = old?.let { DataInputStream(it.inputStream()).use { s -> s.readLong() } } ?: 0L
@@ -111,11 +146,13 @@ class BlockCache(filesDir: File) {
         }
     }
 
-    /** Over [MAX_BLOCKS]: drop the oldest; older versions' folders go entirely. */
-    private fun prune() {
+    /** Over [MAX_BLOCKS]: drop the least recently used (never one used this hour); older versions go entirely. */
+    private fun prune(now: Long) {
         dir.parentFile?.listFiles()?.filter { it != dir }?.forEach { it.deleteRecursively() }
         val files = dir.listFiles() ?: return
+        files.filter { it.name.endsWith(".part") && now - it.lastModified() > KEEP_RECENT_MS }.forEach { it.delete() }
         if (files.size <= MAX_BLOCKS) return
-        files.sortedBy { it.lastModified() }.take(files.size - MAX_BLOCKS).forEach { it.delete() }
+        files.sortedBy { it.lastModified() }.take(files.size - MAX_BLOCKS)
+            .filter { now - it.lastModified() > KEEP_RECENT_MS }.forEach { it.delete() }
     }
 }

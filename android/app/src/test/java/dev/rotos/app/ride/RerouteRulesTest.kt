@@ -72,6 +72,15 @@ class RerouteRulesTest {
         assertFalse(RerouteRules.covers(path, emptyList()))
     }
 
+    @Test fun aBypassStrayingInItsMiddleIsNotCovered() {
+        val old = (0..20).map { LatLon(17.4000, 78.4000 + 0.0005 * it) }          // ~1 km east, dense
+        // starts and ends on the old route, its middle ~330 m north: the segments are checked, not just the ends
+        val bypass = listOf(LatLon(17.4000, 78.4000), LatLon(17.4030, 78.4050), LatLon(17.4000, 78.4100))
+        assertFalse(RerouteRules.covers(bypass, old))
+        val straight = listOf(LatLon(17.4000, 78.4000), LatLon(17.4000, 78.4100))   // the same road in 2 points
+        assertTrue(RerouteRules.covers(straight, old))
+    }
+
     @Test fun offMapOnlyBeyondTheEdge() {
         val path = listOf(LatLon(17.4000, 78.4000), LatLon(17.4000, 78.4100))
         assertFalse(RerouteRules.offMap(LatLon(17.4010, 78.4050), path))       // ~110 m away

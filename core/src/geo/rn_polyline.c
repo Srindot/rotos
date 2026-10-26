@@ -42,8 +42,8 @@ int32_t rn_polyline_decode(const char *enc, double *lat, double *lon, uint32_t c
     }
     uint32_t pos = 0u;
     uint32_t n = 0u;
-    int32_t la = 0;
-    int32_t lo = 0;
+    int64_t la = 0;                                   /* int64: hostile deltas cannot overflow */
+    int64_t lo = 0;
     for (uint32_t guard = 0u; guard < RN_MAX_POLYLINE_LEN && pos < len; guard++) {
         int32_t dla = 0;
         int32_t dlo = 0;
@@ -55,6 +55,9 @@ int32_t rn_polyline_decode(const char *enc, double *lat, double *lon, uint32_t c
         }
         la += dla;
         lo += dlo;
+        if (la < -9000000 || la > 9000000 || lo < -18000000 || lo > 18000000) {
+            return RN_ERR_FORMAT;                     /* beyond +-90 / +-180 degrees */
+        }
         lat[n] = (double)la * 1e-5;
         lon[n] = (double)lo * 1e-5;
         n++;

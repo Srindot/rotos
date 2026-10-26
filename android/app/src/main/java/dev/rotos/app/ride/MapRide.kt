@@ -8,7 +8,13 @@ import dev.rotos.app.route.LatLon
 import dev.rotos.app.route.Route
 import dev.rotos.app.ui.UiModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -30,23 +36,46 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
         private const val LOG_MS = 10_000L
         private const val LINE_ACK_MS = 1_500L
         private const val LINE_TRIES = 3
+        private const val MAP_ROUNDS = 3
         private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     }
 
     @Volatile private var follower: LineFollower? = null
+    /** One line send at a time: two would eat each other's ACKs, or an old line land after a new one. */
+    private val lineLock = Mutex()
     private var lastLogMs = 0L
     private var fixes = 0
 
-    /** The map just reached ROTOS: put Google's route on it as the line (route rides). */
-    suspend fun start(plan: Plan) {
+    /**
+     * The map just reached ROTOS: put Google's route on it as the line (route
+     * rides). [current]: the route to draw if it is newer than the one the map
+     * was built for (a reroute while the map was being built).
+     */
+    suspend fun start(plan: Plan, current: Route? = null) {
         ride.pack = plan.pack
-        ride.route = plan.source
-        if (!ride.line) return
-        val pts = plan.route.points
-        val line = RouteLine.build(Random.nextInt(), plan.pack.routeId, pts, plan.route.maneuvers, plan.route.durationS,
-            plan.pack.originX, plan.pack.originY) ?: return
-        follower = LineFollower(line)                        // the pack holds the same route meanwhile
-        if (!sendLine(line)) host.log("ROTOS did not confirm the line: it draws the map's own route")
+        if (!ride.line) {
+            ride.route = current ?: plan.source
+            return
+        }
+        val pts = lineLock.withLock {
+            // chosen inside the lock: a reroute that finished meanwhile is the route to draw
+            val newest = if (current != null) ride.route ?: current else null
+            val (pts, turns) = if (newest != null) RouteLine.pointsOf(newest) else plan.route.points to plan.route.maneuvers
+            val duration = newest?.durationS ?: plan.route.durationS
+            val line = RouteLine.build(Random.nextInt(), plan.pack.routeId, pts, turns, duration,
+                plan.pack.originX, plan.pack.originY) ?: return
+            if (newest == null) {                            // the pack's own route: follow it at once
+                ride.route = plan.source
+                follower = LineFollower(line)
+            }
+            val ok = sendLocked(line)
+            if (ok && newest != null) {                      // a newer route: only once ROTOS has it
+                ride.route = newest
+                follower = LineFollower(line)
+            }
+            if (!ok) host.log("ROTOS did not confirm the line: it draws the map's own route")
+            pts
+        }
         host.warmMap(pts)                                    // detours / reroutes: their map ready ahead
     }
 
@@ -58,7 +87,7 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
         position(fix, along)
         if (ride.lineLost && f != null) {
             ride.lineLost = false
-            scope.launch { if (!sendLine(f.line)) ride.lineLost = true }      // after a reconnect
+            scope.launch { if (!resendLine()) ride.lineLost = true }          // after a reconnect
         }
         if (ride.busy || !trusted) return
         val here = LatLon(fix.lat, fix.lon)
@@ -66,7 +95,7 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
             val d = RerouteRules.decide(along, GuidanceBus.now.value, f.line.maneuvers, ride.watch, System.currentTimeMillis())
             ride.watch = d.watch
             d.note?.let { host.log(it) }
-            if (d.reroute) scope.launch { reroute(scope, here) }
+            if (d.reroute && ride.mayReroute(offLine = along.wantsReroute)) scope.launch { reroute(scope, here, along.remainingM) }
         } else if (!ride.line && RerouteRules.offMap(here, ride.coverage)) {
             scope.launch { refresh(here) }
         }
@@ -102,8 +131,15 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
             g?.let { UiModel.describe(it) } ?: "-", send.link.state.value))
     }
 
-    /** Sends [line] until ROTOS confirms it (ACK value = line id). */
-    private suspend fun sendLine(line: RouteLine): Boolean {
+    /** The line ROTOS should show now - whichever is current when the lock is ours. */
+    private suspend fun resendLine(): Boolean = lineLock.withLock { follower?.let { sendLocked(it.line) } ?: true }
+
+    /** Sends [line] until ROTOS confirms it (ACK value = line id); [confirmed] runs inside the lock. */
+    private suspend fun sendLine(line: RouteLine, confirmed: () -> Unit = {}): Boolean = lineLock.withLock {
+        sendLocked(line).also { if (it) confirmed() }
+    }
+
+    private suspend fun sendLocked(line: RouteLine): Boolean {
         while (host.lineAcks.tryReceive().isSuccess) { /* drop stale confirmations */ }
         for (attempt in 1..LINE_TRIES) {
             val t0 = System.currentTimeMillis()
@@ -126,7 +162,7 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
      * Google took another road: its new route as the new line, at once. The old
      * line stays if anything fails, and the next try comes within seconds.
      */
-    private suspend fun reroute(scope: CoroutineScope, here: LatLon) {
+    private suspend fun reroute(scope: CoroutineScope, here: LatLon, leftM: Float) {
         ride.rerouting = true
         ride.watch = RerouteWatch()
         try {
@@ -136,44 +172,74 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
                 ride.failed()
                 return
             }
-            val pack = ride.pack ?: return
+            if (ride.pack == null) return
+            val same = RerouteRules.sameRoute(ride.route, leftM, route)
+            ride.rerouted(same)                               // the same route again: back off
+            if (same) {
+                host.log("reroute: Google's route is the one ROTOS shows; next check in ${ride.holdS()} s")
+                return
+            }
             val (pts, turns) = RouteLine.pointsOf(route)
-            val line = RouteLine.build(Random.nextInt(), pack.routeId, pts, turns, route.durationS,
-                pack.originX, pack.originY) ?: return
-            if (!sendLine(line)) {
+            val sent = lineLock.withLock {
+                // built here, inside the lock, in the pixels of the map ROTOS holds *now*
+                // (a background map may have replaced it while Google answered)
+                val pack = ride.pack ?: return
+                val line = RouteLine.build(Random.nextInt(), pack.routeId, pts, turns, route.durationS,
+                    pack.originX, pack.originY) ?: return
+                sendLocked(line).also { ok ->
+                    if (ok) {
+                        follower = LineFollower(line)         // current from the moment ROTOS has it
+                        ride.route = route
+                        ride.line = true
+                    }
+                }
+            }
+            if (!sent) {
                 host.log("reroute: ROTOS did not confirm the new line; trying again shortly")
                 ride.failed()
                 return
             }
-            follower = LineFollower(line)
-            ride.route = route
-            ride.line = true
-            if (!covered(pts)) scope.launch { mapFor(route, here) }
-            host.warmMap(pts)
+            // a map build first if needed (it warms when done): never both at once on the same blocks
+            if (!covered(pts)) scope.launch { mapFor(here) } else host.warmMap(pts)
         } finally {
             ride.rerouting = false
-            host.updateStatus { it.copy(phase = "riding", error = "") }
+            stillRiding()
         }
     }
 
-    /** Does the map ROTOS holds show the new route and the roads around it? */
-    private fun covered(pts: List<LatLon>): Boolean = RerouteRules.covers(pts, ride.coverage)
+    /** Does the map ROTOS holds show the new route and the roads around it? (Off the main thread: long routes.) */
+    private suspend fun covered(pts: List<LatLon>): Boolean =
+        withContext(Dispatchers.Default) { RerouteRules.covers(pts, ride.coverage) }
 
-    /** A map for the new route, in the background; the line is already on ROTOS. */
-    private suspend fun mapFor(route: Route, here: LatLon) {
+    /** Back to "riding" after background work - unless the ride was stopped meanwhile. */
+    private suspend fun stillRiding() {
+        if (currentCoroutineContext().isActive) host.updateStatus { it.copy(phase = "riding", error = "") }
+    }
+
+    /**
+     * A map for the current route, in the background; the line is already on
+     * ROTOS. A reroute while it is built is not lost: the newest route is drawn
+     * on the new map, and gets a map of its own if that one does not cover it.
+     */
+    private suspend fun mapFor(here: LatLon) {
         if (ride.mapping) return
         ride.mapping = true
         try {
-            host.log("new route leaves the map: building its map in the background")
-            val plan = host.replan(ride.cfg.copy(origin = here), Purpose.AUTO, route) ?: return
-            if (!host.sendMap(plan.pack)) return
-            send.prep(Packets.PREP_IDLE)
-            ride.routeId = plan.pack.routeId
-            ride.coverage = plan.route.points
-            start(plan)                                      // the line again, in the new map's pixels
+            for (round in 1..MAP_ROUNDS) {
+                val target = ride.route ?: return
+                host.log("new route leaves the map: building its map in the background")
+                val plan = host.replan(ride.cfg.copy(origin = here), Purpose.AUTO, target) ?: return
+                if (!host.sendMap(plan.pack)) return
+                send.prep(Packets.PREP_IDLE)
+                ride.routeId = plan.pack.routeId
+                ride.coverage = plan.route.points
+                start(plan, ride.route ?: target)            // the newest route, in the new map's pixels
+                val drawn = ride.route ?: return
+                if (drawn === target || covered(RouteLine.pointsOf(drawn).first)) return
+            }
         } finally {
             ride.mapping = false
-            host.updateStatus { it.copy(phase = "riding", error = "") }
+            stillRiding()
         }
     }
 
@@ -194,7 +260,7 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
             host.warmMap(plan.route.points)
         } finally {
             ride.refreshing = false
-            host.updateStatus { it.copy(phase = "riding", error = "") }
+            stillRiding()
         }
     }
 }

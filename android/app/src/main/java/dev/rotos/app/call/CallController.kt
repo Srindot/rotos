@@ -104,6 +104,7 @@ class CallController(
         }
         tracker = step.tracker
         if (e !is PhoneCallEvent.Ringing) ringer.restore()            // answered or over: ring again next time
+        else if (step.frame != null) ringer.restore()                 // a new call: never silenced by an old "ignore"
         step.frame?.let {
             log("call ${it.callId}: ${stateName(it.state)} ${it.name}${if (it.flags and Packets.CALL_F_MISSED != 0) " (missed)" else ""}")
             send(it)
@@ -119,8 +120,13 @@ class CallController(
     suspend fun onAction(a: CallAction) {
         when (a.action) {
             Packets.ACTION_DISMISS -> {
-                log("call ${a.callId}: ignored on ROTOS")
-                ringer.mute()
+                val c = tracker.current
+                if (c != null && c.id == a.callId && !c.answered && !c.ended && !c.handled && !c.rejecting) {
+                    log("call ${a.callId}: ignored on ROTOS")
+                    ringer.mute()
+                } else {
+                    log("call ${a.callId}: ignore pressed after it stopped ringing: ringer left on")
+                }
             }
             Packets.ACTION_REJECT_REPLY -> reject(a.callId)
             else -> log("call ${a.callId}: unknown action ${a.action}")

@@ -95,9 +95,13 @@ class DestinationResolver(private val context: Context) {
             return@withContext Result.failure(IllegalStateException("Could not open the Google Maps link. Check the internet and share it again."))
         }
         MapsLink.coords(full)?.let { return@withContext Result.success(Destination(label ?: it.toString(), it)) }
+        // the place's name beats "@lat,lon", which is only where the sharer's map was centred
+        val centre = MapsLink.centre(full)?.let { Destination(label ?: it.toString(), it) }
         val q = MapsLink.query(full) ?: label
-            ?: return@withContext Result.failure(IllegalArgumentException("No place in that link"))
-        byName(q).map { (at, address) -> Destination(label ?: q, at, address) }
+            ?: return@withContext centre?.let { Result.success(it) }
+                ?: Result.failure(IllegalArgumentException("No place in that link"))
+        val named = byName(q).map { (at, address) -> Destination(label ?: q, at, address) }
+        if (named.isFailure && centre != null) Result.success(centre) else named
     }
 
     /**

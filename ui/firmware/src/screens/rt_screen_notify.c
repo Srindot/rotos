@@ -25,7 +25,7 @@
  * space when possible; *next receives where the following line starts. */
 static uint32_t line_len(const char *s, uint32_t from, int32_t max_w, uint32_t *next)
 {
-    uint32_t per = (uint32_t)(max_w / rt_text_width("M", 1));
+    uint32_t per = (uint32_t)(max_w / (rt_text_width("M", 1) + 1));   /* + the 1 px gap after each glyph */
     uint32_t n = (uint32_t)strlen(&s[from]);
     if (n <= per) {
         *next = from + n;

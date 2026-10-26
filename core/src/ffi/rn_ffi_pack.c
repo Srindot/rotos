@@ -203,6 +203,12 @@ int32_t rn_ffi_pack_load(const uint8_t *blob, int32_t len)
     if (!RN_ASSERT(blob != NULL) || len <= 0 || (uint32_t)len > RN_FFI_PACK_CAP) {
         return RN_ERR_PARAM;
     }
+    RnPack probe;                                    /* checked first: a bad file keeps the good pack */
+    rn_status st = rn_pack_open(&probe, blob, (uint32_t)len);
+    if (st != RN_OK) {
+        return st;
+    }
+    c->writer_open = false;                          /* the writer's bytes are replaced */
     (void)memcpy(c->pack, blob, (uint32_t)len);
     return adopt_pack(c, (uint32_t)len);
 }

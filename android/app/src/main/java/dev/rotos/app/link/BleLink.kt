@@ -35,7 +35,8 @@ import java.util.UUID
  * Runtime permissions (BLUETOOTH_SCAN / CONNECT) are requested by the UI.
  */
 @SuppressLint("MissingPermission")
-class BleLink(private val context: Context) : RotosLink {
+/** [gentle]: ROTOS has been away a long time (bike parked): low-power scans, easy on the battery. */
+class BleLink(private val context: Context, private val gentle: Boolean = false) : RotosLink {
     companion object {
         val SERVICE: UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         val RX_CHAR: UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
@@ -46,6 +47,10 @@ class BleLink(private val context: Context) : RotosLink {
         private const val SCAN_TIMEOUT_MS = 15_000L
         private const val SETUP_TIMEOUT_MS = 15_000L
         private const val WRITE_TIMEOUT_MS = 2_000L
+        /** Sends failing in a row before the link counts as dropped. */
+        private const val MAX_FAILED_SENDS = 3
+        /** The largest attribute value BLE allows (ROTOS rejects longer writes). */
+        private const val MAX_WRITE = 512
     }
 
     private val _state = MutableStateFlow(LinkState.IDLE)
@@ -61,10 +66,13 @@ class BleLink(private val context: Context) : RotosLink {
     private var ready: CompletableDeferred<Result<Unit>>? = null
     private val writeDone = Channel<Int>(1, BufferOverflow.DROP_OLDEST)
     private val writeLock = Mutex()
+    @Volatile private var dropped = false
+    private var failStreak = 0
 
     /** Never throws: Bluetooth off / scan errors come back as failures; the GATT is closed on any failure or cancel. */
     override suspend fun connect(): Result<Unit> {
         _state.value = LinkState.CONNECTING
+        dropped = false
         val found = runCatching { withTimeoutOrNull(SCAN_TIMEOUT_MS) { scan() } }
         if (found.isFailure && found.exceptionOrNull() is kotlinx.coroutines.CancellationException) throw found.exceptionOrNull()!!
         val device = found.getOrElse { return fail("scan failed: ${it.message}") }
@@ -75,9 +83,13 @@ class BleLink(private val context: Context) : RotosLink {
         var ok = false
         try {
             gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
-            val r = withTimeoutOrNull(SETUP_TIMEOUT_MS) { done.await() } ?: Result.failure(IllegalStateException("GATT setup timeout"))
+            var r = withTimeoutOrNull(SETUP_TIMEOUT_MS) { done.await() } ?: Result.failure(IllegalStateException("GATT setup timeout"))
+            if (r.isSuccess && dropped) r = Result.failure(IllegalStateException("disconnected during setup"))
             ok = r.isSuccess
             _state.value = if (ok) LinkState.CONNECTED else LinkState.FAILED
+            if (ok && dropped) {                             // the drop raced with the line above
+                _state.value = LinkState.DISCONNECTED
+            }
             return r
         } finally {
             if (!ok) close()                                   // also when cancelled mid-connect
@@ -105,7 +117,8 @@ class BleLink(private val context: Context) : RotosLink {
             ScanFilter.Builder().setDeviceName(NAME).build(),
             ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build(),
         )
-        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        val mode = if (gentle) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY
+        val settings = ScanSettings.Builder().setScanMode(mode).build()
         scanner.startScan(filters, settings, cb)
         try {
             return found.await()
@@ -120,6 +133,7 @@ class BleLink(private val context: Context) : RotosLink {
                 g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)   // short interval: faster maps
                 g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                dropped = true                               // seen by connect() even before it says CONNECTED
                 ready?.complete(Result.failure(IllegalStateException("disconnected (status $status)")))
                 if (_state.value == LinkState.CONNECTED) _state.value = LinkState.DISCONNECTED
             }
@@ -196,19 +210,31 @@ class BleLink(private val context: Context) : RotosLink {
     }
 
     override suspend fun send(bytes: ByteArray): Result<Unit> = writeLock.withLock {
-        val g = gatt ?: return@withLock Result.failure(IllegalStateException("not connected"))
-        val c = rx ?: return@withLock Result.failure(IllegalStateException("not connected"))
-        val piece = maxOf(20, mtu - 3)
+        val r = sendLocked(bytes)
+        // writes that keep failing mean the link is gone even if Android never said so: let it reconnect
+        failStreak = if (r.isSuccess) 0 else failStreak + 1
+        if (failStreak >= MAX_FAILED_SENDS && _state.value == LinkState.CONNECTED) {
+            _state.value = LinkState.DISCONNECTED
+            runCatching { gatt?.disconnect() }
+        }
+        r
+    }
+
+    private suspend fun sendLocked(bytes: ByteArray): Result<Unit> {
+        val g = gatt ?: return Result.failure(IllegalStateException("not connected"))
+        val c = rx ?: return Result.failure(IllegalStateException("not connected"))
+        while (writeDone.tryReceive().isSuccess) { /* a late completion of a timed-out write */ }
+        val piece = (mtu - 3).coerceIn(20, MAX_WRITE)       // ATT values are 512 bytes at most
         var off = 0
         for (i in 0 until bytes.size / piece + 1) {
             if (off >= bytes.size) break
             val part = bytes.copyOfRange(off, minOf(bytes.size, off + piece))
-            if (!writeChar(g, c, part)) return@withLock Result.failure(IllegalStateException("BLE write rejected"))
+            if (!writeChar(g, c, part)) return Result.failure(IllegalStateException("BLE write rejected"))
             withTimeoutOrNull(WRITE_TIMEOUT_MS) { writeDone.receive() }
-                ?: return@withLock Result.failure(IllegalStateException("BLE write timeout"))
+                ?: return Result.failure(IllegalStateException("BLE write timeout"))
             off += part.size
         }
-        Result.success(Unit)
+        return Result.success(Unit)
     }
 
     override fun close() {

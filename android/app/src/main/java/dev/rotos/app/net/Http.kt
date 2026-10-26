@@ -45,7 +45,7 @@ object Http {
             c.inputStream.use { input ->
                 val out = ByteArrayOutputStream()
                 val buf = ByteArray(16 * 1024)
-                for (i in 0 until MAX_BODY / buf.size + 1) {
+                while (true) {                                   // bounded by MAX_BODY, however small the chunks
                     val n = input.read(buf)
                     if (n < 0) break
                     out.write(buf, 0, n)

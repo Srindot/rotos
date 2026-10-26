@@ -56,6 +56,7 @@ static void on_map(RtApp *app, const RnPacket *p, uint32_t now_ms)
         }
         bool same = app->have_pack && b.total_len == app->pack.len && b.crc32 == app->pack_crc;
         if (same) {                               /* already stored: no upload needed */
+            rt_maprx_cancel(&app->maprx);         /* a transfer cut short before: over */
             hal_log("maprx", "map already stored, bytes", (int32_t)b.total_len);
             (void)rt_link_send_ack(&app->link, now_ms, p->type, p->seq, RN_ACK_HAVE, b.total_len);
             return;
@@ -81,6 +82,9 @@ static void on_map(RtApp *app, const RnPacket *p, uint32_t now_ms)
         }
         r = rt_maprx_end(&app->maprx, &e);
         hal_log("maprx", (r.status == RN_ACK_OK) ? "map stored" : "map rejected", (int32_t)r.value);
+        if (!r.committed) {
+            rt_app_load_pack(app);                /* whatever flash holds now: never a stale pointer */
+        }
     }
     on_map_reply(app, p, &r, now_ms);
 }

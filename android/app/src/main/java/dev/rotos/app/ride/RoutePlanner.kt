@@ -46,7 +46,7 @@ class RoutePlanner(private val context: Context, private val onPicked: (List<Rou
         }.getOrElse { return Result.failure(it) }
         val loaded = RouteLoader.load(route).getOrElse { return Result.failure(it) }
         val buffer = if (cfg.googleNav && !cfg.area) MapPackBuilder.ROUTE_BUFFER_PX else MapPackBuilder.BUFFER_PX
-        val pack = MapPackBuilder(context.cacheDir, BuildConfig.MAPS_API_KEY, BlockCache(context.filesDir), java.io.File(context.filesDir, "tiles")).build(loaded, progress, flyovers = !cfg.googleNav, bufferPx = buffer, purpose = purpose)
+        val pack = MapPackBuilder(context.cacheDir, BuildConfig.MAPS_API_KEY, BlockCache.of(context.filesDir), java.io.File(context.filesDir, "tiles")).build(loaded, progress, flyovers = !cfg.googleNav, bufferPx = buffer, purpose = purpose)
             .getOrElse { return Result.failure(it) }
         // An area map has no route: its sweep line only chose the tiles, so it is not drawn.
         val preview = NavThread.run { MapPreview.render(pack, if (cfg.area) emptyList() else loaded.points) }

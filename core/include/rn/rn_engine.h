@@ -14,6 +14,8 @@
 
 #define RN_ARRIVE_M          15.0f   /* within this of the end ...         */
 #define RN_ARRIVE_MPS         1.5f   /* ... and slower than this = arrived */
+#define RN_ARRIVE_ARM_M     100.0f   /* only after having been this far from the end
+                                      * (a loop ride starts at its end: not "arrived") */
 #define RN_REROUTE_AFTER_MS  8000u   /* off route this long: ask for a new route */
 
 typedef struct {
@@ -35,6 +37,7 @@ typedef struct {
     float speed_mps;        /* smoothed                                  */
     uint32_t off_since_ms;  /* 0 = on route                              */
     bool arrived;
+    bool left_end_zone;     /* matched > RN_ARRIVE_ARM_M before the end once */
 } RnEngine;
 
 void rn_engine_init(RnEngine *e);

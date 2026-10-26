@@ -68,7 +68,15 @@ static uint8_t make_flags(RnEngine *e, const RnRoute *r, const RnFix *fix, float
         flags |= (uint8_t)RN_NAV_NIGHT;
     }
     float remaining = r->total_m - e->matcher.along_m;
-    if (!e->matcher.off_route && remaining < RN_ARRIVE_M && speed < RN_ARRIVE_MPS) {
+    /* a loop ride (start next to the end) starts in the end zone: arrival only
+     * after having left it; any other route can arrive from its first lock */
+    RnVec2 a = r->pts[0].xy;
+    RnVec2 b = r->pts[(r->n_pts > 0u) ? r->n_pts - 1u : 0u].xy;
+    bool loop = r->total_m > RN_ARRIVE_ARM_M && hypotf(b.x - a.x, b.y - a.y) < RN_ARRIVE_ARM_M;
+    if (e->matcher.locked && (!loop || remaining > RN_ARRIVE_ARM_M)) {
+        e->left_end_zone = true;
+    }
+    if (e->left_end_zone && !e->matcher.off_route && remaining < RN_ARRIVE_M && speed < RN_ARRIVE_MPS) {
         e->arrived = true;
     }
     if (e->arrived) {

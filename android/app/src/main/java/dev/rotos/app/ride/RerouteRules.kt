@@ -5,6 +5,7 @@ import dev.rotos.app.route.AreaRoute
 import dev.rotos.app.route.LatLon
 import dev.rotos.app.route.ManeuverInfo
 import dev.rotos.app.route.RoadNames
+import dev.rotos.app.route.Route
 
 /** Where the rider is along the line ROTOS draws (the C engine's map matching). */
 data class Along(val alongM: Float, val remainingM: Float, val remainingS: Int, val wantsReroute: Boolean)
@@ -43,6 +44,7 @@ object RerouteRules {
      * route further than this from the map's route needs its own map.
      */
     const val LINE_COVER_M = 120.0
+    private const val THIN_M = 25.0
     private const val BEHIND_M = 300f
     private const val AHEAD_M = 4_000f
     private const val MIN_DIFF_M = 800f
@@ -70,9 +72,52 @@ object RerouteRules {
         return RerouteDecision(reroute, RerouteWatch(distSince, roadSince), note)
     }
 
+    /**
+     * Is [new] (from where the rider is now) the route ROTOS already shows
+     * ([old], [leftM] of it still ahead)? Same length to go within
+     * max(100 m, 2 %) and the same end: a reroute that changes nothing.
+     */
+    fun sameRoute(old: Route?, leftM: Float?, new: Route): Boolean {
+        if (old == null || leftM == null) return false
+        val left = leftM.toInt()
+        if (Math.abs(left - new.distanceM) > maxOf(100, left / 50)) return false
+        val a = RouteLine.pointsOf(old).first.lastOrNull() ?: return false
+        val b = RouteLine.pointsOf(new).first.lastOrNull() ?: return false
+        return AreaRoute.distanceToPath(a, listOf(b)) < 50.0
+    }
+
     /** Does the map built around [coverage] show all of [pts] with the roads around them? */
-    fun covers(pts: List<LatLon>, coverage: List<LatLon>): Boolean =
-        coverage.isNotEmpty() && pts.all { AreaRoute.distanceToPath(it, coverage) <= LINE_COVER_M }
+    fun covers(pts: List<LatLon>, coverage: List<LatLon>): Boolean {
+        if (coverage.isEmpty()) return false
+        val cover = thin(coverage)                    // ~25 m apart: thousands x thousands would take seconds
+        return dense(thin(pts)).all { AreaRoute.distanceToPath(it, cover) <= LINE_COVER_M }
+    }
+
+    /** Points every [THIN_M] along the polyline: a straight bypass is checked in its middle too. */
+    fun dense(pts: List<LatLon>): List<LatLon> {
+        if (pts.size < 2) return pts
+        val out = ArrayList<LatLon>(pts.size * 2)
+        for (i in 0 until pts.size - 1) {
+            val a = pts[i]
+            val b = pts[i + 1]
+            val n = maxOf(1, (AreaRoute.distanceToPath(a, listOf(b)) / THIN_M).toInt())
+            for (k in 0 until n) out.add(LatLon(a.lat + (b.lat - a.lat) * k / n, a.lon + (b.lon - a.lon) * k / n))
+        }
+        out.add(pts.last())
+        return out
+    }
+
+    /** Points at least [THIN_M] apart (first and last kept): the shape within a few metres. */
+    fun thin(pts: List<LatLon>): List<LatLon> {
+        if (pts.size < 3) return pts
+        val out = ArrayList<LatLon>(pts.size / 4 + 2)
+        out.add(pts.first())
+        for (i in 1 until pts.size - 1) {
+            if (AreaRoute.distanceToPath(pts[i], listOf(out.last())) >= THIN_M) out.add(pts[i])
+        }
+        out.add(pts.last())
+        return out
+    }
 
     /** Further than [EDGE_M] from every point the map was built around. */
     fun offMap(here: LatLon, coverage: List<LatLon>): Boolean =

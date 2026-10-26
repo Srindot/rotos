@@ -221,11 +221,11 @@ rn_status rn_settings_encode(const RnSettings *s, uint8_t *out, uint32_t cap, ui
     if (!RN_ASSERT(s != NULL && out != NULL)) {
         return RN_ERR_PARAM;
     }
-    RnWriter w = rn_writer(out, cap);
-    rn_wr_u8(&w, s->theme_mode);
+    RnWriter w = rn_writer(out, cap);                 /* clamped: the decoder drops out-of-range packets */
+    rn_wr_u8(&w, (s->theme_mode <= RN_THEME_NIGHT) ? s->theme_mode : (uint8_t)RN_THEME_AUTO);
     rn_wr_u8(&w, s->north_up);
-    rn_wr_u8(&w, s->glass_pct);
-    rn_wr_u8(&w, s->brightness_pct);
+    rn_wr_u8(&w, (s->glass_pct <= 100u) ? s->glass_pct : 100u);
+    rn_wr_u8(&w, (s->brightness_pct <= 100u) ? s->brightness_pct : 100u);
     return finish(&w, len);
 }
 
@@ -262,8 +262,8 @@ rn_status rn_forecast_encode(const RnForecast *s, uint8_t *out, uint32_t cap, ui
     rn_wr_u32(&w, s->t_ms);
     rn_wr_u8(&w, (uint8_t)(s->start_hour % 24u));
     rn_wr_u8(&w, s->n);
-    rn_wr_u16(&w, s->sunrise_min);
-    rn_wr_u16(&w, s->sunset_min);
+    rn_wr_u16(&w, (uint16_t)((s->sunrise_min < 1440u) ? s->sunrise_min : 1439u));   /* decoder needs < 1440 */
+    rn_wr_u16(&w, (uint16_t)((s->sunset_min < 1440u) ? s->sunset_min : 1439u));
     for (uint32_t i = 0u; i < s->n; i++) {
         rn_wr_i16(&w, temp10(s->hours[i].temp_c));
         rn_wr_u8(&w, s->hours[i].code);

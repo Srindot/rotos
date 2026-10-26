@@ -36,7 +36,7 @@ object StatusFormatter {
         val b = s.build ?: return null
         if (s.phase != "planning") return null
         val text = when {
-            b.total > 0 && b.tiles > 0 -> "Building map: block ${b.done} of ${b.total} (${b.tiles} new map tiles, saved for next time)"
+            b.total > 0 && b.stage.startsWith("downloading") -> "Downloading new map tiles: ${b.done} of ${b.total} (saved for next time)"
             b.total > 0 -> "Building map: block ${b.done} of ${b.total}"
             else -> b.stage.replaceFirstChar { it.uppercase() } + "…"
         }

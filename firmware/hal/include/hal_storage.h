@@ -23,6 +23,8 @@ uint32_t hal_storage_map_capacity(void);
 bool hal_storage_map_begin(uint32_t len);
 /* Write bytes at offset (offsets arrive in order). */
 bool hal_storage_map_write(uint32_t offset, const uint8_t *bytes, uint32_t n);
+/* Read back bytes of the pack being written (to check what really reached flash). */
+bool hal_storage_map_read(uint32_t offset, uint8_t *out, uint32_t n);
 /* Make the new pack current (len bytes, already CRC-checked by the caller). */
 bool hal_storage_map_commit(uint32_t len);
 /* Drop the pack being written (failed transfer); the current pack stays. */

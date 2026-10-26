@@ -25,6 +25,9 @@ void rt_app_load_pack(RtApp *app)
     }
     uint32_t len = 0u;
     const uint8_t *blob = hal_storage_map(&len);
+    if (app->have_pack && blob == app->pack.blob && len == app->pack.len) {
+        return;                                       /* same mapping: no CRC pass, keep the tile cache */
+    }
     app->have_pack = blob != NULL && rn_pack_open(&app->pack, blob, len) == RN_OK;
     app->pack_crc = app->have_pack ? rn_crc32(blob, len) : 0u;
     rn_tile_cache_init(app->cache);
@@ -142,7 +145,8 @@ void rt_app_step(RtApp *app, uint32_t now_ms)
             finish_ride(app, now_ms);                /* phone stopped or gone: summary, stats */
         }
     }
-    if (app->maprx.active && now_ms - app->maprx.last_rx_ms > RT_MAPRX_STALL_MS) {
+    /* signed: last_rx_ms may be later than this frame's now_ms (stamped after a long flash erase) */
+    if (app->maprx.active && (int32_t)(now_ms - app->maprx.last_rx_ms) > (int32_t)RT_MAPRX_STALL_MS) {
         hal_log("maprx", "transfer abandoned, bytes", (int32_t)app->maprx.received);
         app->maprx.active = false;
         app->maprx.failed++;

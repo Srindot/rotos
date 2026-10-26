@@ -93,9 +93,10 @@ class GoogleTiles(private val apiKey: String, private val cacheDir: File) {
     /** A valid session token (reused until a day before it expires; a new one counts against the caps). */
     fun session(purpose: Purpose = Purpose.USER): Result<String> = runCatching {
         cached()?.let { return@runCatching it }
-        UsageGuard.acquire(GoogleApi.TILE_SESSION, 1, purpose).getOrThrow()
+        val day = UsageGuard.acquire(GoogleApi.TILE_SESSION, 1, purpose).getOrThrow()
         val bytes = Http.post(SESSION_URL.format(apiKey), sessionBody().toByteArray(), "application/json", TIMEOUT_MS,
             AppIdentity.googleHeaders())
+            .onFailure { UsageGuard.refund(GoogleApi.TILE_SESSION, 1, day) }
             .getOrThrow()
         val (token, expiry) = parseSession(String(bytes))
         sessionFile.parentFile?.mkdirs()

@@ -17,11 +17,15 @@ class TileWindow(private val tiles: TileCache, private val zoom: Int) {
         const val LAND = 0xF2EFE9                              // GoogleTiles' land colour
     }
 
-    private val lru = object : LinkedHashMap<Long, IntArray?>(LRU_TILES, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, IntArray?>?) = size > LRU_TILES
+    private val lru = object : LinkedHashMap<Long, IntArray>(LRU_TILES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, IntArray>?) = size > LRU_TILES
     }
 
     var failed: Int = 0
+        private set
+
+    /** Tiles whose real pixels went into the last [rgb] window: only cells over these are right. */
+    var lastUsed: Set<Pair<Int, Int>> = emptySet()
         private set
 
     /** World pixel (x0, y0) at [zoom], size w x h -> RGB bytes. */
@@ -36,12 +40,15 @@ class TileWindow(private val tiles: TileCache, private val zoom: Int) {
         val ty0 = Math.floorDiv(y0, TILE)
         val tx1 = Math.floorDiv(x0 + w - 1, TILE)
         val ty1 = Math.floorDiv(y0 + h - 1, TILE)
+        val used = HashSet<Pair<Int, Int>>()
         for (ty in ty0..ty1) {
             for (tx in tx0..tx1) {
                 val px = pixels(tx, ty) ?: continue
                 blit(px, tx * TILE, ty * TILE, x0, y0, w, h, out)
+                used.add(tx to ty)
             }
         }
+        lastUsed = used
         return out
     }
 
@@ -66,10 +73,14 @@ class TileWindow(private val tiles: TileCache, private val zoom: Int) {
         val n = 1 shl zoom
         if (tx < 0 || ty < 0 || tx >= n || ty >= n) return null
         val key = (tx.toLong() shl 32) or (ty.toLong() and 0xFFFFFFFFL)
-        if (lru.containsKey(key)) return lru[key]
-        val png = tiles.read(zoom, tx, ty)
-        val px = png?.let { decode(it) }
-        if (png != null && px == null) failed++
+        lru[key]?.let { return it }
+        val png = tiles.read(zoom, tx, ty) ?: return null      // not on disk (yet): never remembered as missing
+        val px = decode(png)
+        if (px == null) {
+            failed++
+            tiles.forget(zoom, tx, ty)                          // undecodable: downloaded again next time
+            return null
+        }
         lru[key] = px
         return px
     }

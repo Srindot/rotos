@@ -39,15 +39,18 @@ class TcpLink(private val host: String, private val port: Int) : RotosLink {
 
     override suspend fun connect(): Result<Unit> = withContext(Dispatchers.IO) {
         _state.value = LinkState.CONNECTING
+        val s = Socket()
         runCatching {
-            val s = Socket()
             s.tcpNoDelay = true
             s.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
             socket = s
             out = s.getOutputStream()
             reader = scope.launch { readLoop(s) }
             _state.value = LinkState.CONNECTED
-        }.onFailure { _state.value = LinkState.FAILED }
+        }.onFailure {
+            runCatching { s.close() }                        // retried every few seconds: no socket leak
+            _state.value = LinkState.FAILED
+        }
     }
 
     private suspend fun readLoop(s: Socket) {

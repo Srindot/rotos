@@ -19,6 +19,35 @@ static RtMapRxReply reply(bool send, uint8_t status, uint32_t value)
     return r;
 }
 
+#define VERIFY_CHUNK 1024u
+
+void rt_maprx_cancel(RtMapRx *m)
+{
+    if (!RN_ASSERT(m != NULL)) {
+        return;
+    }
+    if (m->active) {
+        hal_storage_map_abort();                     /* its slot is cleaned in the background */
+        m->active = false;
+    }
+}
+
+/* CRC of what really reached flash (an unerased byte or a failed program
+ * would not show in the CRC of the bytes received). */
+static bool flash_crc_ok(const RtMapRx *m)
+{
+    static uint8_t buf[VERIFY_CHUNK];
+    uint32_t crc = RN_CRC32_INIT;
+    for (uint32_t off = 0u; off < m->pack_len; off += VERIFY_CHUNK) {
+        uint32_t n = (m->pack_len - off < VERIFY_CHUNK) ? m->pack_len - off : VERIFY_CHUNK;
+        if (!hal_storage_map_read(off, buf, n)) {
+            return false;
+        }
+        crc = rn_crc32_update(buf, n, crc);
+    }
+    return rn_crc32_final(crc) == m->crc_expected;
+}
+
 void rt_maprx_init(RtMapRx *m)
 {
     if (!RN_ASSERT(m != NULL)) {
@@ -33,13 +62,18 @@ RtMapRxReply rt_maprx_begin(RtMapRx *m, const RnMapBegin *b, uint32_t now_ms, co
     if (!RN_ASSERT(m != NULL && b != NULL)) {
         return reply(true, RN_ACK_BAD_STATE, 0u);
     }
-    m->active = false;
+    rt_maprx_cancel(m);                              /* a transfer cut short: give its slot back */
+    m->done_len = 0u;                                /* a new transfer: the old "done" no longer stands */
     if (b->total_len < RN_PACK_HEADER || b->total_len > hal_storage_map_capacity()) {
         m->failed++;
         return reply(true, RN_ACK_TOO_BIG, 0u);
     }
     bool patch = b->base_crc != 0u;
-    if (patch && (base == NULL || base_crc != b->base_crc || b->wire_len == 0u)) {
+    uint32_t slot = hal_storage_map_capacity() / 2u;
+    /* a patch needs its base readable during the whole transfer: never when either
+     * pack takes both slots - said BEFORE any flash is touched (the current map stays) */
+    if (patch && (base == NULL || base_crc != b->base_crc || b->wire_len == 0u || b->total_len > slot ||
+                  base_len > slot)) {
         return reply(true, RN_ACK_NO_BASE, 0u);          /* the phone sends the whole pack */
     }
     if (!hal_storage_map_begin(b->total_len)) {
@@ -68,7 +102,7 @@ RtMapRxReply rt_maprx_begin(RtMapRx *m, const RnMapBegin *b, uint32_t now_ms, co
     m->route_id = b->route_id;
     m->chunks_since_ack = 0u;
     m->started_ms = now_ms;
-    m->last_rx_ms = now_ms;
+    m->last_rx_ms = hal_time_ms();                   /* after the erase: the stall timer starts now */
     if (m->compressed) {
         rn_inflate_init(&m->inf);
     }
@@ -160,8 +194,15 @@ RtMapRxReply rt_maprx_chunk(RtMapRx *m, const RnMapChunk *c)
 
 RtMapRxReply rt_maprx_end(RtMapRx *m, const RnMapEnd *e)
 {
-    if (!RN_ASSERT(m != NULL && e != NULL) || !m->active) {
+    if (!RN_ASSERT(m != NULL && e != NULL)) {
         return reply(true, RN_ACK_BAD_STATE, 0u);
+    }
+    if (!m->active) {                                /* the OK for it was lost: committed already */
+        bool done = m->done_len != 0u && e->total_len == m->done_len && e->crc32 == m->done_crc;
+        return done ? reply(true, RN_ACK_OK, m->done_len) : reply(true, RN_ACK_BAD_STATE, 0u);
+    }
+    if (!m->corrupt && m->received < m->total) {     /* chunks lost in the last window: resend, not fail */
+        return reply(true, RN_ACK_BAD_STATE, m->received);
     }
     m->active = false;
     if (m->compressed && !m->corrupt && m->received == m->total) {
@@ -170,12 +211,18 @@ RtMapRxReply rt_maprx_end(RtMapRx *m, const RnMapEnd *e)
     bool ok = !m->corrupt && e->total_len == m->pack_len && m->received == m->total &&
               m->written == m->pack_len && e->crc32 == m->crc_expected &&
               rn_crc32_final(m->crc_running) == m->crc_expected;
+    if (ok && !flash_crc_ok(m)) {
+        hal_log("maprx", "flash content does not match the CRC: not committed", 0);
+        ok = false;
+    }
     if (!ok || !hal_storage_map_commit(m->pack_len)) {
         hal_storage_map_abort();
         m->failed++;
         return reply(true, RN_ACK_BAD_CRC, m->received);
     }
     m->completed++;
+    m->done_len = m->pack_len;
+    m->done_crc = m->crc_expected;
     hal_log("maprx", "map received in ms", (int32_t)(hal_time_ms() - m->started_ms));
     RtMapRxReply r = reply(true, RN_ACK_OK, m->pack_len);
     r.committed = true;
