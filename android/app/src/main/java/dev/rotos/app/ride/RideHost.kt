@@ -19,9 +19,9 @@ interface RideHost {
      * Plans [cfg] with progress on ROTOS; null when planning failed. With
      * [route], only the map is built for that route (no Routes call).
      */
-    suspend fun replan(cfg: RideConfig, purpose: Purpose, route: Route? = null): Plan?
+    suspend fun replan(cfg: RideConfig, purpose: Purpose, route: Route? = null, quickIfNew: Boolean = false): Plan?
     /** Google's route only (one Routes call, matched to what Google Maps navigates), for instant reroutes. */
-    suspend fun findRoute(cfg: RideConfig, purpose: Purpose): Result<Route>
+    suspend fun findRoute(cfg: RideConfig, purpose: Purpose, headingDeg: Float? = null, matchGoogle: Boolean = true): Result<Route>
     /** Sends the planned map pack, retried across reconnects; false when it never arrived. */
     suspend fun sendMap(pack: PackInfo): Boolean
     /** In the background, saves the map blocks around [points] (reroutes / detours then find them ready). */

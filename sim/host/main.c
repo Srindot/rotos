@@ -59,6 +59,7 @@ static bool init_all(const SimArgs *a)
         return false;
     }
     rt_app_init(&g_app, &g_cache, g_line, hal_time_ms());
+    g_app.reset_reason = 1u;                                   /* the simulator: always a power-on */
     RnSettings s = g_app.settings;
     s.theme_mode = (a->theme >= 0) ? (uint8_t)a->theme : s.theme_mode;
     s.north_up = (a->north_up >= 0) ? (uint8_t)a->north_up : s.north_up;

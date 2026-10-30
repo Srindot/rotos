@@ -65,10 +65,19 @@ class GuidanceMirror(
      * to [TARGET_WAIT_MS] for its first real summary (a shared place starts
      * Google navigation and planning at the same moment).
      */
-    suspend fun target(waitMs: Long = TARGET_WAIT_MS): GoogleTarget? {
+    /** A navigation ended: its roads must not steer the next trip's route choice. */
+    fun forgetRoads() {
+        roads = emptyList()
+    }
+
+    suspend fun target(waitMs: Long = TARGET_WAIT_MS, fresh: Boolean = false): GoogleTarget? {
+        val before = GuidanceBus.now.value
         val g = withTimeoutOrNull(waitMs) {
-            GuidanceBus.now.first { it != null && !it.rerouting && it.remainingM != null }
-        } ?: GuidanceBus.now.value
+            // fresh: a summary that differs from the one showing now (the new trip, not the old one)
+            GuidanceBus.now.first {
+                it != null && !it.rerouting && it.remainingM != null && (!fresh || it.remainingM != before?.remainingM)
+            }
+        } ?: if (fresh) null else GuidanceBus.now.value
         if (g == null) {
             log("route: no Google Maps summary yet, using the first route")
             return null

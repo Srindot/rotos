@@ -123,6 +123,18 @@ class MapPackBuilder(
     }
 
     /**
+     * Share of the cells along [points] already saved (BlockCache): close to 1
+     * = a known area, its map is built in well under a second; low = new
+     * streets, worth a quick first map. Reads 8 bytes per block.
+     */
+    suspend fun knownShare(points: List<LatLon>): Float = withContext(Dispatchers.IO) {
+        val cache = blocks ?: return@withContext 0f
+        val need = TilePlan.byBlock(TilePlan.cellsAround(points, 0))
+        if (need.isEmpty()) return@withContext 1f
+        need.count { (b, m) -> cache.mask(b.first, b.second) and m == m }.toFloat() / need.size
+    }
+
+    /**
      * [flyovers]: flyover hints from road names for ROTOS's own turns. Off when
      * Google Maps navigates (Google gives the turns).
      * [purpose]: who asked, for the Google usage caps (UsageGuard).

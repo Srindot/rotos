@@ -211,6 +211,22 @@ static void test_line(void)
     CHECK(rn_line_position_at(&l, 999.0f).y == 20.0f && rn_line_position_at(&l, -5.0f).x == 0.0f);
 }
 
+static void test_device_status(void)
+{
+    RnDeviceStatus st = {123456u, 9u, (uint8_t)(RN_DEVICE_RIDE_FOUND | RN_DEVICE_RIDE_RESUMED), 38u};
+    RnPacket pkt;
+    memset(&pkt, 0, sizeof pkt);
+    pkt.type = RN_PKT_DEVICE_STATUS;
+    CHECK(rn_device_status_encode(&st, pkt.payload, sizeof pkt.payload, &pkt.len) == RN_OK && pkt.len == 12u);
+    CHECK(pkt.payload[0] == 0x40u && pkt.payload[1] == 0xE2u && pkt.payload[4] == 9u && pkt.payload[5] == 3u &&
+          pkt.payload[8] == 38u);                             /* little-endian, as the phone reads it */
+    RnDeviceStatus d;
+    CHECK(rn_device_status_decode(&pkt, &d) == RN_OK);
+    CHECK(d.uptime_ms == 123456u && d.reset_reason == 9u && d.flags == 3u && d.off_s == 38u);
+    pkt.len = 11u;
+    CHECK(rn_device_status_decode(&pkt, &d) == RN_ERR_FORMAT);
+}
+
 void test_protocol_calls(void);
 
 void test_protocol(void)
@@ -224,6 +240,7 @@ void test_protocol(void)
     test_notify();
     test_route_chunk();
     test_line();
+    test_device_status();
     test_protocol_calls();
 }
 

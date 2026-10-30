@@ -47,6 +47,36 @@ void rt_app_apply_settings(RtApp *app, const RnSettings *s, bool save)
     }
 }
 
+/*
+ * Power came back with a ride in flash (engine off at a signal): straight to
+ * the riding map at the last position, the ride's distance and times carry
+ * on. Whether it really is the same ride is decided once the phone's clock
+ * says how long ROTOS was off (decide_resume).
+ */
+static void restore_ride(RtApp *app, uint32_t now_ms)
+{
+    if (!rt_resume_load(&app->resume)) {
+        return;
+    }
+    const RtResumeSnap *s = &app->resume;
+    app->device_flags = (uint8_t)RN_DEVICE_RIDE_FOUND;
+    app->off_s = RN_DEVICE_OFF_UNKNOWN;
+    rt_ride_restore(&app->ride, now_ms, s->distance_m, s->ride_ms, s->moving_ms, s->max_mps,
+                    s->have_clock != 0u, s->start_s);
+    if (app->have_pack && s->nav.route_id == app->pack.h.route_id) {
+        rn_tracker_reset(&app->tracker);
+        rn_tracker_on_nav(&app->tracker, &s->nav, now_ms);
+    }
+    rt_phone_on_night(&app->phone, (s->nav.flags & RN_NAV_NIGHT) != 0u);   /* the theme it rode in */
+    app->state = RT_ST_NAVIGATING;
+    app->page = RT_PAGE_MAP;
+    app->page_ms = now_ms;
+    app->nav_seen_ms = now_ms;
+    app->restore_ms = now_ms;
+    app->resume_pending = true;
+    hal_log("app", "power back with a ride in progress, km x10", (int32_t)(s->distance_m / 100.0f));
+}
+
 void rt_app_init(RtApp *app, RnTileCache *cache, RnPackPoint *line_buf, uint32_t now_ms)
 {
     if (!RN_ASSERT(app != NULL && cache != NULL)) {
@@ -75,6 +105,7 @@ void rt_app_init(RtApp *app, RnTileCache *cache, RnPackPoint *line_buf, uint32_t
     app->panel_ms = hal_time_ms();
     app->stats = rt_stats_load();
     rt_app_load_pack(app);
+    restore_ride(app, hal_time_ms());
 }
 
 static void start_ride(RtApp *app, uint32_t now_ms)
@@ -84,23 +115,76 @@ static void start_ride(RtApp *app, uint32_t now_ms)
     app->ride_requested = false;
     app->page = RT_PAGE_MAP;
     app->page_ms = now_ms;
-    rt_ride_start(&app->ride, now_ms, have_clock, clock);
+    if (!app->ride.active) {                         /* a restored ride (power cut) carries on */
+        rt_ride_start(&app->ride, now_ms, have_clock, clock);
+    }
     app->state = RT_ST_NAVIGATING;
     app->nav_seen_ms = now_ms;
     hal_log("app", "ride started, route", (int32_t)app->pack.h.route_id);
 }
 
-static void finish_ride(RtApp *app, uint32_t now_ms)
+/* [quiet]: a ride closed in the background (an old one found at boot): statistics, no card. */
+static void finish_ride(RtApp *app, uint32_t now_ms, bool quiet)
 {
+    rt_resume_clear();                               /* over: nothing to carry across a power cut */
+    app->resume_pending = false;
     uint32_t clock = 0u;
     bool have_clock = rt_phone_clock(&app->phone, now_ms, &clock);
     app->summary = rt_ride_finish(&app->ride, now_ms, have_clock, clock);
     app->summary_ms = now_ms;
-    app->state = RT_ST_SUMMARY;
+    app->state = quiet ? RT_ST_DASHBOARD : RT_ST_SUMMARY;
     app->page = RT_PAGE_DASHBOARD;
+    if (quiet) {
+        rn_tracker_reset(&app->tracker);
+    }
     hal_log("app", "arrived, distance m", (int32_t)app->summary.distance_m);
     if (!rt_stats_add_ride(&app->stats, app->summary.distance_m, app->summary.ride_s)) {
         hal_log("app", "ride statistics not saved", 0);
+    }
+}
+
+/* Off time vs re-engage time: same ride if ROTOS was off briefly, else the old ride is closed. */
+static void decide_resume(RtApp *app, uint32_t now_ms)
+{
+    uint32_t clock = 0u;
+    if (!app->resume_pending || !app->phone.have_status || !rt_phone_clock(&app->phone, now_ms, &clock)) {
+        return;
+    }
+    app->resume_pending = false;
+    uint32_t off = rt_resume_off_s(&app->resume, clock, app->phone.status.day, app->phone.status.month);
+    app->off_s = (off == RT_RESUME_OFF_UNKNOWN) ? RN_DEVICE_OFF_UNKNOWN : off;
+    if (off != RT_RESUME_OFF_UNKNOWN && off <= RT_RESUME_MAX_S) {
+        /* the ride time includes the stop: the time ROTOS was really off (the clock has been
+         * running again since restore_ride) */
+        uint32_t since = now_ms - app->restore_ms;
+        uint32_t dark_ms = (off * 1000u > since) ? off * 1000u - since : 0u;
+        app->ride.start_ms -= dark_ms;
+        app->device_flags |= (uint8_t)RN_DEVICE_RIDE_RESUMED;
+        hal_log("app", "same ride: ROTOS was off, s", (int32_t)off);
+    } else {
+        app->device_flags |= (uint8_t)RN_DEVICE_RIDE_CLOSED;
+        hal_log("app", "off too long: the old ride is closed, s", (int32_t)off);
+        finish_ride(app, now_ms, true);              /* its statistics, no card over today's ride */
+    }
+    RnDeviceStatus st = {now_ms, app->reset_reason, app->device_flags, app->off_s};
+    (void)rt_link_send_device_status(&app->link, now_ms, &st);
+}
+
+/* Every RT_RESUME_SAVE_MS while riding (never before the resume is decided: its time is the evidence). */
+static void save_snapshot(RtApp *app, uint32_t now_ms)
+{
+    uint32_t clock = 0u;
+    /* only while positions are fresh: a ride that stopped (arrived, phone gone) must not look in progress */
+    if (app->resume_pending || now_ms - app->snap_ms < RT_RESUME_SAVE_MS || !app->ride.active ||
+        rn_tracker_age_ms(&app->tracker, now_ms) > RT_NAV_TIMEOUT_MS ||
+        !app->phone.have_status || !rt_phone_clock(&app->phone, now_ms, &clock)) {
+        return;
+    }
+    app->snap_ms = now_ms;
+    RtResumeSnap s = rt_resume_snap(&app->ride, &app->tracker.last, now_ms, clock, app->phone.status.day,
+                                    app->phone.status.month);
+    if (!rt_resume_save(&s)) {
+        hal_log("app", "ride snapshot not saved", 0);
     }
 }
 
@@ -109,6 +193,7 @@ static void step_navigation(RtApp *app, uint32_t now_ms)
     if (!app->have_pack || !app->tracker.have) {
         return;                                      /* new map on its way */
     }
+    save_snapshot(app, now_ms);
     rn_tracker_update(&app->tracker, &app->pack, now_ms);
     bool free = app->tracker.free;                   /* Google Maps navigates */
     rt_ride_update(&app->ride, free ? app->tracker.odo_m : app->tracker.along_m, app->tracker.speed_mps, now_ms);
@@ -116,7 +201,51 @@ static void step_navigation(RtApp *app, uint32_t now_ms)
     bool at_end = !free && app->pack.h.total_m - app->tracker.along_m < RT_ARRIVE_M &&
                   app->tracker.speed_mps < 1.0f;
     if (arrived_flag || at_end) {
-        finish_ride(app, now_ms);
+        finish_ride(app, now_ms, false);
+    }
+}
+
+/* Every link-up: ROTOS's uptime and why it started, so the phone can log a power cut vs a BLE drop. */
+static void send_status_on_link_up(RtApp *app, uint32_t now_ms)
+{
+    bool ok = rt_link_ok(&app->link, now_ms);
+    if (ok && !app->link_was_ok) {
+        app->link_up_ms = now_ms;
+        app->linked_since_boot = true;
+        RnDeviceStatus st = {now_ms, app->reset_reason, app->device_flags,
+                             app->resume_pending ? RN_DEVICE_OFF_UNKNOWN : app->off_s};
+        (void)rt_link_send_device_status(&app->link, now_ms, &st);
+    }
+    app->link_was_ok = ok;
+}
+
+/*
+ * Riding: the phone ends a ride itself (ARRIVED). No positions only ends it
+ * after RT_RESUME_MAX_S (tunnel, lost GPS, Bluetooth or power gone), counted
+ * from the last position, link-up or map chunk.
+ */
+static void step_ride(RtApp *app, uint32_t now_ms)
+{
+    if (app->state != RT_ST_NAVIGATING) {
+        return;
+    }
+    if (app->maprx.active) {
+        app->nav_seen_ms = now_ms;                   /* a new map on its way is not a stopped ride */
+    }
+    step_navigation(app, now_ms);
+    uint32_t seen = app->nav_seen_ms;
+    if (app->link_up_ms != 0u && (int32_t)(app->link_up_ms - seen) > 0) {
+        seen = app->link_up_ms;
+    }
+    if (app->state == RT_ST_NAVIGATING && (int32_t)(now_ms - seen) > (int32_t)(RT_RESUME_MAX_S * 1000u)) {
+        hal_log("app", "no positions for 10 min: ride over", 0);
+        finish_ride(app, now_ms, app->resume_pending);   /* never confirmed: no card */
+        return;
+    }
+    /* restored at boot but no phone for a minute (maybe it was left at home): the dashboard,
+     * the ride kept pending in case it turns up */
+    if (app->resume_pending && !app->linked_since_boot && now_ms - app->restore_ms > 60000u) {
+        app->state = RT_ST_DASHBOARD;
     }
 }
 
@@ -126,8 +255,10 @@ void rt_app_step(RtApp *app, uint32_t now_ms)
         return;
     }
     rt_themectl_update(&app->theme, app->phone.have_night, app->phone.night, now_ms);
-    if (!app->maprx.active) {
-        hal_storage_service();                      /* ready the free map slot, a sector a frame */
+    /* ready the free map slot, a sector at a time: every frame when idle, every 4th while
+     * riding (each sector erase stalls a frame ~40 ms) */
+    if (!app->maprx.active && (app->state != RT_ST_NAVIGATING || (app->frames & 3u) == 0u)) {
+        hal_storage_service();
     }
     if (app->state == RT_ST_BOOT && now_ms - app->boot_ms >= RT_BOOT_MS) {
         app->state = RT_ST_WAITING;
@@ -138,13 +269,9 @@ void rt_app_step(RtApp *app, uint32_t now_ms)
     if (app->state == RT_ST_DASHBOARD && app->ride_requested && app->have_pack) {
         start_ride(app, now_ms);
     }
-    if (app->state == RT_ST_NAVIGATING) {
-        step_navigation(app, now_ms);
-        if (app->state == RT_ST_NAVIGATING && now_ms - app->nav_seen_ms > RT_RIDE_ABANDON_MS) {
-            hal_log("app", "no positions for 90 s: ride over", 0);
-            finish_ride(app, now_ms);                /* phone stopped or gone: summary, stats */
-        }
-    }
+    decide_resume(app, now_ms);                      /* a ride restored at boot: same ride or closed */
+    step_ride(app, now_ms);
+    send_status_on_link_up(app, now_ms);
     /* signed: last_rx_ms may be later than this frame's now_ms (stamped after a long flash erase) */
     if (app->maprx.active && (int32_t)(now_ms - app->maprx.last_rx_ms) > (int32_t)RT_MAPRX_STALL_MS) {
         hal_log("maprx", "transfer abandoned, bytes", (int32_t)app->maprx.received);

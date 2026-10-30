@@ -58,6 +58,7 @@
 #define RN_PKT_ACK           0x21u
 #define RN_PKT_BUTTON        0x22u
 #define RN_PKT_CALL_ACTION   0x23u
+#define RN_PKT_DEVICE_STATUS 0x24u      /* ROTOS -> phone: uptime, why it (re)started */
 
 /* NAV_STATE flags */
 #define RN_NAV_GPS_OK        0x01u
@@ -322,6 +323,21 @@ typedef struct {
     uint32_t value;
 } RnAck;
 
+/* DEVICE_STATUS, 12 bytes (ROTOS -> phone, on every link-up and when a ride
+ * resume is decided): u32 uptime_ms, u8 reset_reason (esp_reset_reason_t:
+ * 1 power on, 9 brownout ...), u8 flags, u16 reserved, u32 off_s (how long
+ * ROTOS was off, from the phone's clock; RN_DEVICE_OFF_UNKNOWN until known) */
+#define RN_DEVICE_RIDE_FOUND   0x01u  /* a ride was in progress when power went */
+#define RN_DEVICE_RIDE_RESUMED 0x02u  /* off briefly: the same ride goes on      */
+#define RN_DEVICE_RIDE_CLOSED  0x04u  /* off too long: that ride was closed      */
+#define RN_DEVICE_OFF_UNKNOWN  0xFFFFFFFFu
+typedef struct {
+    uint32_t uptime_ms;
+    uint8_t reset_reason;
+    uint8_t flags;
+    uint32_t off_s;
+} RnDeviceStatus;
+
 /* BUTTON, 2 bytes: u8 button (0..2), u8 event */
 typedef struct {
     uint8_t button;
@@ -364,6 +380,8 @@ rn_status rn_map_chunk_encode(const RnMapChunk *s, uint8_t *out, uint32_t cap, u
 rn_status rn_map_chunk_decode(const RnPacket *p, RnMapChunk *out);
 rn_status rn_map_end_encode(const RnMapEnd *s, uint8_t *out, uint32_t cap, uint16_t *len);
 rn_status rn_map_end_decode(const RnPacket *p, RnMapEnd *out);
+rn_status rn_device_status_encode(const RnDeviceStatus *s, uint8_t *out, uint32_t cap, uint16_t *len);
+rn_status rn_device_status_decode(const RnPacket *p, RnDeviceStatus *out);
 rn_status rn_ack_encode(const RnAck *s, uint8_t *out, uint32_t cap, uint16_t *len);
 rn_status rn_ack_decode(const RnPacket *p, RnAck *out);
 rn_status rn_button_encode(const RnButton *s, uint8_t *out, uint32_t cap, uint16_t *len);

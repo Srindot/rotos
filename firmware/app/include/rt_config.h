@@ -4,7 +4,7 @@
 #ifndef RT_CONFIG_H
 #define RT_CONFIG_H
 
-#define RT_VERSION_TEXT     "V3.0 BETA  SPEED 400"
+#define RT_VERSION_TEXT     "V4.0 BETA  SPEED 400"
 
 #define RT_SCREEN_W         240
 #define RT_SCREEN_H         320
@@ -18,6 +18,8 @@
 #define RT_LINK_TIMEOUT_MS  3500u                    /* no packets: link lost */
 #define RT_NAV_TIMEOUT_MS   3500u                    /* no NAV_STATE: stale   */
 #define RT_RIDE_ABANDON_MS  90000u                   /* no NAV_STATE: ride over */
+#define RT_RESUME_MAX_S     600u                     /* off this long (engine off at a signal): same ride */
+#define RT_RESUME_SAVE_MS   30000u                   /* ride snapshot to flash while riding       */
 #define RT_MAPRX_STALL_MS   30000u                   /* no map chunk: give up */
 #define RT_SUMMARY_MS       15000u                   /* ride summary card     */
 #define RT_PREP_TIMEOUT_MS  10000u                   /* phone progress panel  */

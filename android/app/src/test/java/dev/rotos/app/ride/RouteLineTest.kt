@@ -60,4 +60,18 @@ class RouteLineTest {
         val still = f.copy(speedMps = 0.5f)
         assertEquals(still, FixAhead.ahead(still, 1_500L))                    // standing: unchanged
     }
+
+    @Test fun aUTurnOnADividedRoadIsNotSkipped() {
+        // 1 km north, U-turn across a 15 m median, 1 km back south
+        val out = (0..100).map { LatLon(17.4400 + it * 0.00009, 78.3500) }
+        val back = (0..100).map { LatLon(17.4490 - it * 0.00009, 78.35014) }
+        val l = RouteLine.build(8, 99, out + back, emptyList(), 300f, origin.first.toInt(), origin.second.toInt())!!
+        val f = LineFollower(l)
+        // riding north, 300 m before the U-turn, the fix drifting 9 m toward the far carriageway
+        repeat(3) { k ->
+            val (x, y) = l.pxOf(LatLon(17.4460 + k * 0.00005, 78.35008))
+            val a = f.follow(x, y, trusted = true, courseDeg = 0f)
+            assertTrue("along ${a.alongM} must stay on the way out", a.alongM < 1_000f)
+        }
+    }
 }

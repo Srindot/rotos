@@ -32,6 +32,7 @@
 #define KEY_USED0     "pk_used0"
 #define KEY_USED1     "pk_used1"
 #define KEY_SETTINGS  "settings"
+#define KEY_RIDE      "ride"
 #define NO_WRITE      0xFFFFFFFFu
 #define ERASE_STEP    (64u * 1024u)
 
@@ -335,4 +336,22 @@ bool hal_storage_settings_save(const uint8_t *in, uint32_t n)
 {
     return s_nvs_ok && in != NULL && nvs_set_blob(s_nvs, KEY_SETTINGS, in, n) == ESP_OK &&
            nvs_commit(s_nvs) == ESP_OK;
+}
+
+bool hal_storage_ride_load(uint8_t *out, uint32_t n)
+{
+    size_t got = n;
+    return s_nvs_ok && out != NULL && nvs_get_blob(s_nvs, KEY_RIDE, out, &got) == ESP_OK && got == n;
+}
+
+bool hal_storage_ride_save(const uint8_t *in, uint32_t n)
+{
+    return s_nvs_ok && in != NULL && nvs_set_blob(s_nvs, KEY_RIDE, in, n) == ESP_OK && nvs_commit(s_nvs) == ESP_OK;
+}
+
+void hal_storage_ride_clear(void)
+{
+    if (s_nvs_ok && nvs_erase_key(s_nvs, KEY_RIDE) == ESP_OK) {
+        (void)nvs_commit(s_nvs);
+    }
 }

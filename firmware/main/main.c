@@ -75,6 +75,7 @@ void app_main(void)
         hal_log("main", "no RAM for route lines (reroutes resend the map)", 0);
     }
     rt_app_init(&g_app, cache, line, hal_time_ms());
+    g_app.reset_reason = (uint8_t)esp_reset_reason();     /* told to the phone (DEVICE_STATUS) */
     (void)esp_task_wdt_add(NULL);                     /* a stuck loop reboots (sdkconfig: 15 s) */
     for (;;) {                                        /* JPL-R2 exempt: main loop */
         uint32_t now = hal_time_ms();

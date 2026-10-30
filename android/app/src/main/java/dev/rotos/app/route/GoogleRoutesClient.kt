@@ -16,29 +16,34 @@ class GoogleRoutesClient(private val apiKey: String) {
             "routes.legs.steps.distanceMeters"
         private const val TIMEOUT_MS = 20_000
 
-        fun requestBody(from: LatLon, to: LatLon): String = JSONObject()
-            .put("origin", waypoint(from))
+        /** [headingDeg]: the rider's course (0-359), so Google plans forward from the road they are on,
+         *  not a U-turn back to the road they left; null when not moving. */
+        /** [alternatives]: only when one is to be matched to what Google Maps shows (smaller otherwise). */
+        fun requestBody(from: LatLon, to: LatLon, headingDeg: Float? = null, alternatives: Boolean = true): String = JSONObject()
+            .put("origin", waypoint(from, headingDeg))
             .put("destination", waypoint(to))
             .put("travelMode", "TWO_WHEELER")
             .put("routingPreference", "TRAFFIC_AWARE")             // like the Google Maps app
-            .put("computeAlternativeRoutes", true)
+            .put("computeAlternativeRoutes", alternatives)
             .put("languageCode", "en")
             .put("units", "METRIC")
             .toString()
 
-        private fun waypoint(p: LatLon) = JSONObject().put(
+        private fun waypoint(p: LatLon, headingDeg: Float? = null) = JSONObject().put(
             "location", JSONObject().put(
                 "latLng", JSONObject().put("latitude", p.lat).put("longitude", p.lon),
-            ),
+            ).also { loc -> headingDeg?.takeIf { it.isFinite() }?.let { loc.put("heading", Math.floorMod(Math.round(it), 360)) } },
         )
     }
 
     /** Google's two-wheeler route and its alternatives (one billed call, if the caps allow it). */
-    fun routes(from: LatLon, to: LatLon, purpose: Purpose = Purpose.USER): Result<List<Route>> {
+    fun routes(
+        from: LatLon, to: LatLon, purpose: Purpose = Purpose.USER, headingDeg: Float? = null, alternatives: Boolean = true,
+    ): Result<List<Route>> {
         if (apiKey.isBlank()) return Result.failure(IllegalStateException("no Google API key"))
         val day = UsageGuard.acquire(GoogleApi.ROUTES, 1, purpose).getOrElse { return Result.failure(it) }
         val headers = mapOf("X-Goog-Api-Key" to apiKey, "X-Goog-FieldMask" to FIELD_MASK) + AppIdentity.googleHeaders()
-        return Http.post(URL, requestBody(from, to).toByteArray(), "application/json", TIMEOUT_MS, headers)
+        return Http.post(URL, requestBody(from, to, headingDeg, alternatives).toByteArray(), "application/json", TIMEOUT_MS, headers)
             .onFailure { UsageGuard.refund(GoogleApi.ROUTES, 1, day) }          // never answered: not billed
             .mapCatching { GoogleRouteParser.parseAll(String(it), "google").getOrThrow() }
     }

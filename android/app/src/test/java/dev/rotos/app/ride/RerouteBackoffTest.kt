@@ -44,7 +44,7 @@ class RerouteBackoffTest {
         var t = 0L
         repeat(ActiveRide.MAX_PER_HOUR) { t += 3 * 60_000L; r.rerouted(false, t) }   // spaced out: no streak
         assertTrue(r.capUntilMs > t + 60_000L)                // the hour's budget is spent: held until it frees up
-        assertFalse(r.mayReroute(offLine = true, now = t + 60_000L))   // not even a wrong turn
+        assertFalse(r.mayReroute(urgent = true, now = t + 60_000L))   // not even a wrong turn
     }
 
     @Test fun aDisagreementThatComesBackAfterEveryHoldKeepsGrowingIt() {
@@ -65,7 +65,16 @@ class RerouteBackoffTest {
         val r = ride()
         var t = 0L
         repeat(5) { t += 10_000L; r.rerouted(false, t) }      // a long hold now
-        assertFalse(r.mayReroute(offLine = false, now = t + 31_000L))
-        assertTrue(r.mayReroute(offLine = true, now = t + 31_000L))
+        assertFalse(r.mayReroute(urgent = false, now = t + 31_000L))
+        assertTrue(r.mayReroute(urgent = true, now = t + 31_000L))
+    }
+
+    @Test fun pastTheHoursCapAWrongTurnStillGetsALineEveryTwoMinutes() {
+        val r = ride()
+        var t = 0L
+        repeat(ActiveRide.MAX_PER_HOUR) { t += 3 * 60_000L; r.rerouted(false, t) }
+        assertFalse(r.mayReroute(urgent = false, now = t + 130_000L))     // a mere disagreement waits out the hour
+        assertFalse(r.mayReroute(urgent = true, now = t + 60_000L))
+        assertTrue(r.mayReroute(urgent = true, now = t + 121_000L))      // the line never freezes for long
     }
 }

@@ -124,6 +124,19 @@ bool rt_link_send_call_action(RtLink *l, uint32_t now_ms, uint16_t call_id, uint
     return send(l, now_ms, RN_PKT_CALL_ACTION, payload, len);
 }
 
+bool rt_link_send_device_status(RtLink *l, uint32_t now_ms, const RnDeviceStatus *st)
+{
+    if (!RN_ASSERT(l != NULL && st != NULL)) {
+        return false;
+    }
+    uint8_t payload[16];
+    uint16_t len = 0u;
+    if (rn_device_status_encode(st, payload, sizeof payload, &len) != RN_OK) {
+        return false;
+    }
+    return send(l, now_ms, RN_PKT_DEVICE_STATUS, payload, len);
+}
+
 void rt_link_keepalive(RtLink *l, uint32_t now_ms)
 {
     if (!RN_ASSERT(l != NULL)) {

@@ -85,6 +85,10 @@ static void time_left(const RtHudData *d, char *v, uint32_t cap, const char **la
         return;
     }
     uint32_t left = (d->eta_s % 86400u + 86400u - d->time_s % 86400u) % 86400u;
+    if (left > 12u * 3600u) {                         /* the ETA just passed (minute resolution) */
+        (void)rt_fmt_cat(v, cap, "<1");
+        return;
+    }
     uint32_t min = (left + 59u) / 60u;
     if (min < 60u) {
         (void)rt_fmt_u32(v, cap, min, 1u);

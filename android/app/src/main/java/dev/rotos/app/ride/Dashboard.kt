@@ -45,8 +45,15 @@ class Dashboard(
         val reader = PhoneStatusReader(context)
         var nextStatus = 0L
         var nextWeather = 0L
+        var wasUp = true
         while (isActive) {
             val now = System.currentTimeMillis()
+            val up = send.link.state.value == dev.rotos.app.link.LinkState.CONNECTED
+            if (up && !wasUp) {                          // ROTOS back (maybe restarted): its weather is gone
+                nextWeather = 0L
+                nextStatus = 0L
+            }
+            wasUp = up
             if (now >= nextStatus) {
                 phoneStatus(reader)
                 nextStatus = now + STATUS_MS

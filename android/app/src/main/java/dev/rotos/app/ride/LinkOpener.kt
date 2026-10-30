@@ -9,6 +9,7 @@ import dev.rotos.app.link.TcpLink
 import dev.rotos.app.nav.Ack
 import dev.rotos.app.nav.ButtonEvent
 import dev.rotos.app.nav.CallAction
+import dev.rotos.app.nav.DeviceStatus
 import dev.rotos.app.nav.NativeNav
 import dev.rotos.app.nav.NavThread
 import dev.rotos.app.nav.Packets
@@ -69,7 +70,7 @@ object LinkOpener {
         return null
     }
 
-    private class Inbound(val type: Int, val ack: Ack?, val button: ButtonEvent?, val call: CallAction?)
+    private class Inbound(val type: Int, val ack: Ack?, val button: ButtonEvent?, val call: CallAction?, val device: DeviceStatus?)
 
     /**
      * ROTOS -> phone: ACKs (map transfer to [acks], route lines to [lineAcks]),
@@ -77,11 +78,14 @@ object LinkOpener {
      */
     suspend fun route(
         l: RotosLink, acks: SendChannel<Ack>, lineAcks: SendChannel<Ack>, calls: () -> CallController?,
-        log: (String) -> Unit,
+        log: (String) -> Unit, device: (DeviceStatus) -> Unit = {},
     ) = coroutineScope {
         l.incoming.collect { bytes ->
             val events = NavThread.run {
-                RxDecoder.feed(bytes).map { p -> Inbound(p.type, RxDecoder.ack(p), RxDecoder.button(p), RxDecoder.callAction(p)) }
+                RxDecoder.feed(bytes).map { p ->
+                    Inbound(p.type, RxDecoder.ack(p), RxDecoder.button(p), RxDecoder.callAction(p),
+                        if (p.type == Packets.DEVICE_STATUS) DeviceStatus.parse(p.payload, p.len) else null)
+                }
             }
             for (e in events) {
                 when (e.type) {
@@ -92,6 +96,7 @@ object LinkOpener {
                         // off this loop: a reject waits up to 20 s for its SMS, ACKs must not wait behind it
                         calls()?.let { c -> launch { c.onAction(a) } } ?: log("call alerts disabled: action ignored")
                     }
+                    Packets.DEVICE_STATUS -> e.device?.let(device)
                     Packets.PING -> Unit
                     else -> log("rx type 0x%02x ignored".format(e.type))
                 }

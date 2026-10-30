@@ -150,3 +150,20 @@ bool hal_storage_settings_save(const uint8_t *in, uint32_t n)
 {
     return in != NULL && write_file("settings.bin", in, n);
 }
+
+bool hal_storage_ride_load(uint8_t *out, uint32_t n)
+{
+    return out != NULL && read_file("ride.bin", out, n) == n;
+}
+
+bool hal_storage_ride_save(const uint8_t *in, uint32_t n)
+{
+    return in != NULL && write_file("ride.bin", in, n);
+}
+
+void hal_storage_ride_clear(void)
+{
+    char p[512];
+    path_of(p, sizeof p, "ride.bin");
+    (void)remove(p);
+}

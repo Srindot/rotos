@@ -37,6 +37,7 @@ bool rt_link_send_ack(RtLink *l, uint32_t now_ms, uint8_t acked_type, uint16_t a
                       uint8_t status, uint32_t value);
 bool rt_link_send_button(RtLink *l, uint32_t now_ms, uint8_t button, uint8_t event);
 bool rt_link_send_call_action(RtLink *l, uint32_t now_ms, uint16_t call_id, uint8_t action);
+bool rt_link_send_device_status(RtLink *l, uint32_t now_ms, const RnDeviceStatus *st);
 /* PING when nothing was sent for RT_PING_MS. */
 void rt_link_keepalive(RtLink *l, uint32_t now_ms);
 

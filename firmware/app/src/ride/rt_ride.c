@@ -22,6 +22,18 @@ void rt_ride_start(RtRide *r, uint32_t now_ms, bool have_clock, uint32_t clock_s
     r->start_s = clock_s;
 }
 
+void rt_ride_restore(RtRide *r, uint32_t now_ms, float distance_m, uint32_t ride_ms, uint32_t moving_ms,
+                     float max_mps, bool have_clock, uint32_t start_s)
+{
+    if (!RN_ASSERT(r != NULL)) {
+        return;
+    }
+    rt_ride_start(r, now_ms - ride_ms, have_clock, start_s);
+    r->distance_m = (distance_m > 0.0f) ? distance_m : 0.0f;
+    r->moving_ms = moving_ms;
+    r->max_mps = (max_mps > 0.0f) ? max_mps : 0.0f;
+}
+
 void rt_ride_rebase(RtRide *r)
 {
     if (!RN_ASSERT(r != NULL)) {

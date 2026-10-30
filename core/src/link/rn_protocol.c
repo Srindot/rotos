@@ -21,6 +21,7 @@
 #define MAP_END_LEN        8u
 #define ACK_LEN            8u
 #define BUTTON_LEN         2u
+#define DEVICE_STATUS_LEN 12u
 #define FORECAST_HDR      10u
 #define FORECAST_HOUR      5u
 #define CALL_STATE_LEN    32u
@@ -658,6 +659,34 @@ rn_status rn_button_decode(const RnPacket *p, RnButton *out)
     RnReader r = rn_reader(p->payload, p->len);
     out->button = rn_rd_u8(&r);
     out->event = rn_rd_u8(&r);
+    return r.ok ? RN_OK : RN_ERR_FORMAT;
+}
+
+rn_status rn_device_status_encode(const RnDeviceStatus *s, uint8_t *out, uint32_t cap, uint16_t *len)
+{
+    if (!RN_ASSERT(s != NULL && out != NULL)) {
+        return RN_ERR_PARAM;
+    }
+    RnWriter w = rn_writer(out, cap);
+    rn_wr_u32(&w, s->uptime_ms);
+    rn_wr_u8(&w, s->reset_reason);
+    rn_wr_u8(&w, s->flags);
+    rn_wr_u16(&w, 0u);
+    rn_wr_u32(&w, s->off_s);
+    return finish(&w, len);
+}
+
+rn_status rn_device_status_decode(const RnPacket *p, RnDeviceStatus *out)
+{
+    if (!RN_ASSERT(out != NULL) || !payload_ok(p, RN_PKT_DEVICE_STATUS, DEVICE_STATUS_LEN)) {
+        return RN_ERR_FORMAT;
+    }
+    RnReader r = rn_reader(p->payload, p->len);
+    out->uptime_ms = rn_rd_u32(&r);
+    out->reset_reason = rn_rd_u8(&r);
+    out->flags = rn_rd_u8(&r);
+    (void)rn_rd_u16(&r);
+    out->off_s = rn_rd_u32(&r);
     return r.ok ? RN_OK : RN_ERR_FORMAT;
 }
 

@@ -51,6 +51,10 @@ class BleLink(private val context: Context, private val gentle: Boolean = false)
         private const val MAX_FAILED_SENDS = 3
         /** The largest attribute value BLE allows (ROTOS rejects longer writes). */
         private const val MAX_WRITE = 512
+        /** A direct connect to the ROTOS seen last: under a second once it advertises (no scan). */
+        private const val DIRECT_TIMEOUT_MS = 6_000L
+        /** The ROTOS this app last connected to (reconnects after its power came back). */
+        @Volatile var lastAddress: String? = null
     }
 
     private val _state = MutableStateFlow(LinkState.IDLE)
@@ -72,27 +76,49 @@ class BleLink(private val context: Context, private val gentle: Boolean = false)
     /** Never throws: Bluetooth off / scan errors come back as failures; the GATT is closed on any failure or cancel. */
     override suspend fun connect(): Result<Unit> {
         _state.value = LinkState.CONNECTING
-        dropped = false
+        // the ROTOS we know first, directly: after a power cut (engine off at a signal) it is back
+        // in about 2 s, and a direct connect finds it at once where a scan may take many seconds
+        val known = lastAddress
+        val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+        if (known != null && adapter != null) {
+            val direct = runCatching { adapter.getRemoteDevice(known) }.getOrNull()
+            if (direct != null && attach(direct, DIRECT_TIMEOUT_MS).isSuccess) return Result.success(Unit)
+            _state.value = LinkState.CONNECTING
+        }
         val found = runCatching { withTimeoutOrNull(SCAN_TIMEOUT_MS) { scan() } }
         if (found.isFailure && found.exceptionOrNull() is kotlinx.coroutines.CancellationException) throw found.exceptionOrNull()!!
         val device = found.getOrElse { return fail("scan failed: ${it.message}") }
             ?: return fail("no ROTOS found (scan ${SCAN_TIMEOUT_MS / 1000} s)")
+        val r = attach(device, SETUP_TIMEOUT_MS)
+        if (r.isFailure) _state.value = LinkState.FAILED
+        return r
+    }
+
+    /** GATT connect + setup to [device] within [timeoutMs]; the GATT is closed on failure or cancel. */
+    private suspend fun attach(device: BluetoothDevice, timeoutMs: Long): Result<Unit> {
+        dropped = false
         peer = device.address
         val done = CompletableDeferred<Result<Unit>>()
         ready = done
         var ok = false
         try {
             gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
-            var r = withTimeoutOrNull(SETUP_TIMEOUT_MS) { done.await() } ?: Result.failure(IllegalStateException("GATT setup timeout"))
+            var r = withTimeoutOrNull(timeoutMs) { done.await() } ?: Result.failure(IllegalStateException("GATT setup timeout"))
             if (r.isSuccess && dropped) r = Result.failure(IllegalStateException("disconnected during setup"))
             ok = r.isSuccess
-            _state.value = if (ok) LinkState.CONNECTED else LinkState.FAILED
-            if (ok && dropped) {                             // the drop raced with the line above
-                _state.value = LinkState.DISCONNECTED
+            if (ok) {
+                lastAddress = device.address
+                _state.value = LinkState.CONNECTED
+                if (dropped) _state.value = LinkState.DISCONNECTED   // the drop raced with the line above
             }
             return r
         } finally {
-            if (!ok) close()                                   // also when cancelled mid-connect
+            if (!ok) {                                       // also when cancelled mid-connect
+                runCatching { gatt?.disconnect() }
+                runCatching { gatt?.close() }
+                gatt = null
+                rx = null
+            }
         }
     }
 
@@ -129,6 +155,7 @@ class BleLink(private val context: Context, private val gentle: Boolean = false)
 
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (g !== gatt) return                         // a closed earlier attempt: not ours
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)   // short interval: faster maps
                 g.discoverServices()
@@ -140,6 +167,7 @@ class BleLink(private val context: Context, private val gentle: Boolean = false)
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            if (g !== gatt) return                         // a closed earlier attempt: not ours
             val svc = g.getService(SERVICE)
             if (svc == null) {
                 ready?.complete(Result.failure(IllegalStateException("ROTOS service missing")))
@@ -150,6 +178,7 @@ class BleLink(private val context: Context, private val gentle: Boolean = false)
         }
 
         override fun onMtuChanged(g: BluetoothGatt, newMtu: Int, status: Int) {
+            if (g !== gatt) return                         // a closed earlier attempt: not ours
             mtu = if (status == BluetoothGatt.GATT_SUCCESS) newMtu else 23
             val tx = g.getService(SERVICE)?.getCharacteristic(TX_CHAR)
             if (tx == null || rx == null) {
@@ -166,6 +195,7 @@ class BleLink(private val context: Context, private val gentle: Boolean = false)
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
+            if (g !== gatt) return                         // a closed earlier attempt: not ours
             ready?.complete(
                 if (status == BluetoothGatt.GATT_SUCCESS) Result.success(Unit)
                 else Result.failure(IllegalStateException("enable notifications failed $status")),

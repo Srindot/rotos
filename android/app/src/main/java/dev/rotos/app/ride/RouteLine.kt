@@ -143,15 +143,20 @@ class LineFollower(val line: RouteLine) {
         private const val WINDOW_BACK = 8
         private const val WINDOW_AHEAD = 80
         private const val LOST_M = 150f
+        private const val AGAINST_DEG = 110.0
     }
 
     private var seg = 0
     private var offCount = 0
 
     /** Position (pack px) -> Along; [trusted]: moving with a good fix (RerouteRules.trusted). */
-    fun follow(x: Float, y: Float, trusted: Boolean): Along {
-        var best = nearest(x, y, maxOf(0, seg - WINDOW_BACK), minOf(line.size - 1, seg + WINDOW_AHEAD))
-        if (best.second * line.mPerPx > LOST_M) best = nearest(x, y, 0, line.size - 1)   // jumped: search all
+    fun follow(x: Float, y: Float, trusted: Boolean, courseDeg: Float? = null): Along {
+        // moving: only segments going the rider's way (the far side of a U-turn on a divided road
+        // is a few metres away but points back; matching it would skip the line ahead)
+        var best = nearest(x, y, maxOf(0, seg - WINDOW_BACK), minOf(line.size - 1, seg + WINDOW_AHEAD), courseDeg)
+        if (best.second == Float.MAX_VALUE) best = nearest(x, y, maxOf(0, seg - WINDOW_BACK), minOf(line.size - 1, seg + WINDOW_AHEAD), null)
+        if (best.second * line.mPerPx > LOST_M) best = nearest(x, y, 0, line.size - 1, courseDeg)   // jumped: search all
+        if (best.second == Float.MAX_VALUE) best = nearest(x, y, 0, line.size - 1, null)
         seg = best.first
         val offM = best.second * line.mPerPx
         offCount = when {
@@ -167,15 +172,27 @@ class LineFollower(val line: RouteLine) {
     }
 
     /** (segment index, distance in px) of the closest segment in [from, to]. */
-    private fun nearest(x: Float, y: Float, from: Int, to: Int): Pair<Int, Float> {
+    private fun nearest(x: Float, y: Float, from: Int, to: Int, courseDeg: Float?): Pair<Int, Float> {
         var bestI = from
         var bestD = Float.MAX_VALUE
         for (i in from until to) {
+            if (courseDeg != null && against(i, courseDeg)) continue
             val d = RouteLine.segDist(x.toDouble(), y.toDouble(), line.xs[i].toDouble(), line.ys[i].toDouble(),
                 line.xs[i + 1].toDouble(), line.ys[i + 1].toDouble()).toFloat()
             if (d < bestD) { bestD = d; bestI = i }
         }
         return bestI to bestD
+    }
+
+    /** Segment i points more than [AGAINST_DEG] away from the course (pack px: x east, y south). */
+    private fun against(i: Int, courseDeg: Float): Boolean {
+        val dx = (line.xs[i + 1] - line.xs[i]).toDouble()
+        val dy = (line.ys[i + 1] - line.ys[i]).toDouble()
+        if (dx * dx + dy * dy < 1e-6) return false
+        val bearing = Math.toDegrees(Math.atan2(dx, -dy))
+        var diff = Math.abs(bearing - courseDeg) % 360.0
+        if (diff > 180.0) diff = 360.0 - diff
+        return diff > AGAINST_DEG
     }
 
     private fun alongOn(i: Int, x: Float, y: Float): Float {

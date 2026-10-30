@@ -46,6 +46,7 @@ sequence numbers.
 | 0x21 | ACK | ROTOS → phone | map transfer | 8 B: acked type, status, acked seq, value |
 | 0x22 | BUTTON | ROTOS → phone | button press | 2 B: button 0-2, event (1 short, 2 long) |
 | 0x23 | CALL_ACTION | ROTOS → phone | call popup button | 4 B: call_id, action (1 reject + reply SMS, 2 dismiss), reserved |
+| 0x24 | DEVICE_STATUS | ROTOS → phone | on every link-up, and when ROTOS decides whether a ride goes on after a power cut | 12 B: u32 uptime ms, u8 reset reason (esp_reset_reason_t: 1 power on, 9 brownout …), u8 flags (1 a ride was in progress at the restart, 2 it goes on: off ≤ 10 min, 4 closed: off longer), u16 0, u32 seconds ROTOS was off (all-ones: not known yet) |
 
 NAV_STATE flags: `0x01 GPS_OK, 0x02 OFF_ROUTE, 0x04 REROUTING, 0x08 NIGHT, 0x10 ARRIVED, 0x20 FREE` (position only: Google Maps navigates), `0x40 LINE` (with FREE: draw the pack's route, `along` is valid), `0x80 HEADING` (with FREE: the heading is a real GPS course).
 

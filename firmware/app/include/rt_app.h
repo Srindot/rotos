@@ -31,6 +31,7 @@
 #include "rt_notify.h"
 #include "rt_phone.h"
 #include "rt_present.h"
+#include "rt_resume.h"
 #include "rt_ride.h"
 #include "rt_routerx.h"
 #include "rt_screens.h"
@@ -86,6 +87,17 @@ typedef struct {
     RtStats stats;            /* odometer + last ride, kept in flash     */
     uint32_t frames;
     uint32_t panel_ms;        /* last panel refresh (rt_ili9341_refresh) */
+    /* power cuts (engine off at a signal): the ride goes on, see rt_resume */
+    RtResumeSnap resume;      /* the snapshot found at boot               */
+    bool resume_pending;      /* restored at boot; off time not known yet */
+    uint32_t snap_ms;         /* last snapshot save                       */
+    uint8_t reset_reason;     /* why ROTOS (re)started (esp_reset_reason) */
+    uint8_t device_flags;     /* RN_DEVICE_RIDE_*                          */
+    uint32_t off_s;           /* how long ROTOS was off, once known       */
+    bool link_was_ok;         /* for DEVICE_STATUS on every link-up       */
+    uint32_t link_up_ms;      /* last link-up: a reconnect is not a stopped ride */
+    uint32_t restore_ms;      /* when restore_ride ran (boot)             */
+    bool linked_since_boot;   /* the phone was there at least once        */
 } RtApp;
 
 /* cache: decoded-tile cache storage. It is kept outside RtApp so a target

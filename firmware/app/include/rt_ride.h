@@ -29,6 +29,9 @@ void rt_ride_start(RtRide *r, uint32_t now_ms, bool have_clock, uint32_t clock_s
 void rt_ride_update(RtRide *r, float along_m, float speed_mps, uint32_t now_ms);
 /* Forget along history (new route). */
 void rt_ride_rebase(RtRide *r);
+/* Carry on a ride saved before a power cut: ride_ms already ridden. */
+void rt_ride_restore(RtRide *r, uint32_t now_ms, float distance_m, uint32_t ride_ms, uint32_t moving_ms,
+                     float max_mps, bool have_clock, uint32_t start_s);
 RtRideSummary rt_ride_finish(RtRide *r, uint32_t now_ms, bool have_clock, uint32_t clock_s);
 
 #endif /* RT_RIDE_H */

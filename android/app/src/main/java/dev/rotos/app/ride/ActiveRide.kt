@@ -19,6 +19,8 @@ class ActiveRide(val cfg: RideConfig, val purpose: Purpose = Purpose.USER) {
         const val HOLD_MAX_MS = 600_000L
         /** Automatic reroutes per hour at most (each is a billed Routes call). */
         const val MAX_PER_HOUR = 20
+        /** Past the hour's budget: an urgent reroute at most this often. */
+        const val CAPPED_URGENT_MS = 120_000L
     }
 
     private var lastRerouteMs = 0L
@@ -49,14 +51,15 @@ class ActiveRide(val cfg: RideConfig, val purpose: Purpose = Purpose.USER) {
     }
 
     /**
-     * May an automatic reroute run now? Never past the hour's cap. A real
-     * wrong turn ([offLine]: the rider left ROTOS's line) waits at most 30 s
-     * of a hold; Google merely disagreeing waits out all of it.
+     * May an automatic reroute run now? Past the hour's cap only an urgent one, every 2 min. An [urgent]
+     * one (the rider left ROTOS's line, or Google Maps rerouted) waits at most
+     * 30 s of a hold; a mere disagreement waits out all of it.
      */
     @Synchronized
-    fun mayReroute(offLine: Boolean, now: Long = System.currentTimeMillis()): Boolean {
-        if (now < capUntilMs) return false
-        val until = if (offLine) minOf(holdUntilMs, lastRerouteMs + HOLD_FIRST_MS) else holdUntilMs
+    fun mayReroute(urgent: Boolean, now: Long = System.currentTimeMillis()): Boolean {
+        // past the hour's budget a real wrong turn still gets a new line, slowly (never a frozen line)
+        if (now < capUntilMs) return urgent && now - lastRerouteMs >= CAPPED_URGENT_MS
+        val until = if (urgent) minOf(holdUntilMs, lastRerouteMs + HOLD_FIRST_MS) else holdUntilMs
         return now >= until
     }
 

@@ -16,8 +16,15 @@ data class Along(val alongM: Float, val remainingM: Float, val remainingS: Int, 
  */
 data class RerouteWatch(val distanceSince: Long = 0L, val roadSince: Long = 0L, val googleRerouting: Boolean = false)
 
-/** [reroute]: ask for a new route now. [note]: something worth logging, once. */
-data class RerouteDecision(val reroute: Boolean, val watch: RerouteWatch, val note: String? = null)
+/** Why a reroute is asked for. OFF_LINE and GOOGLE are urgent: the line on ROTOS is wrong now. */
+enum class RerouteWhy { NONE, OFF_LINE, GOOGLE, ROAD, DISTANCE }
+
+/** [reroute]: ask for a new route now ([why]). [note]: something worth logging, once. */
+data class RerouteDecision(
+    val reroute: Boolean, val watch: RerouteWatch, val note: String? = null, val why: RerouteWhy = RerouteWhy.NONE,
+) {
+    val urgent: Boolean get() = why == RerouteWhy.OFF_LINE || why == RerouteWhy.GOOGLE
+}
 
 /**
  * When the line on ROTOS no longer is Google's route, as pure functions
@@ -45,6 +52,8 @@ object RerouteRules {
      */
     const val LINE_COVER_M = 120.0
     private const val THIN_M = 25.0
+    /** Within this of the shown line all along = the same road (GPS / polyline wobble). */
+    private const val SAME_M = 30.0
     private const val BEHIND_M = 300f
     private const val AHEAD_M = 4_000f
     private const val MIN_DIFF_M = 800f
@@ -62,28 +71,29 @@ object RerouteRules {
         speedMps >= MIN_SPEED_MPS && accuracyM in 0f..MAX_ACCURACY_M
 
     fun decide(a: Along, g: Guidance?, line: List<ManeuverInfo>?, w: RerouteWatch, now: Long): RerouteDecision {
-        if (a.wantsReroute) return RerouteDecision(true, w)
+        if (a.wantsReroute) return RerouteDecision(true, w, why = RerouteWhy.OFF_LINE)
         if (g?.rerouting == true) return RerouteDecision(false, w.copy(googleRerouting = true))
-        if (w.googleRerouting && g != null) return RerouteDecision(true, RerouteWatch(), "Google Maps picked a new route")
+        if (w.googleRerouting && g != null) return RerouteDecision(true, RerouteWatch(), "Google Maps picked a new route", RerouteWhy.GOOGLE)
         val (roadSince, note) = roadWatch(a, g, line, w.roadSince, now)
-        if (roadSince != 0L && now - roadSince >= MISMATCH_MS) return RerouteDecision(true, w.copy(roadSince = roadSince), note)
+        if (roadSince != 0L && now - roadSince >= MISMATCH_MS) {
+            return RerouteDecision(true, w.copy(roadSince = roadSince), note, RerouteWhy.ROAD)
+        }
         val distSince = distanceWatch(a, g, w.distanceSince, now)
         val reroute = distSince != 0L && now - distSince >= DISTANCE_MS
-        return RerouteDecision(reroute, RerouteWatch(distSince, roadSince), note)
+        return RerouteDecision(reroute, RerouteWatch(distSince, roadSince), note, if (reroute) RerouteWhy.DISTANCE else RerouteWhy.NONE)
     }
 
     /**
-     * Is [new] (from where the rider is now) the route ROTOS already shows
-     * ([old], [leftM] of it still ahead)? Same length to go within
-     * max(100 m, 2 %) and the same end: a reroute that changes nothing.
+     * Is [new] the route ROTOS already shows ([old])? Only if it runs on the same
+     * road all along: every point of it within [SAME_M] of the old line. (A
+     * similar length to the same destination is not enough: a parallel road
+     * often is just as long - and then the rider would never get its line.)
      */
-    fun sameRoute(old: Route?, leftM: Float?, new: Route): Boolean {
-        if (old == null || leftM == null) return false
-        val left = leftM.toInt()
-        if (Math.abs(left - new.distanceM) > maxOf(100, left / 50)) return false
-        val a = RouteLine.pointsOf(old).first.lastOrNull() ?: return false
-        val b = RouteLine.pointsOf(new).first.lastOrNull() ?: return false
-        return AreaRoute.distanceToPath(a, listOf(b)) < 50.0
+    fun sameRoute(old: Route?, new: Route): Boolean {
+        if (old == null) return false
+        val path = thin(RouteLine.pointsOf(old).first)
+        if (path.size < 2) return false
+        return dense(thin(RouteLine.pointsOf(new).first)).all { AreaRoute.distanceToPath(it, path) <= SAME_M }
     }
 
     /** Does the map built around [coverage] show all of [pts] with the roads around them? */

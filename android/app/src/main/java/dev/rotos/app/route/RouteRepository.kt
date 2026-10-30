@@ -17,8 +17,9 @@ class RouteRepository(private val apiKey: String, private val assets: AssetManag
     val usesGoogle: Boolean get() = apiKey.isNotBlank()
 
     /** Google's candidate routes; fails without a key, a network or headroom under the caps. */
-    suspend fun alternatives(from: LatLon, to: LatLon, purpose: Purpose = Purpose.USER): Result<List<Route>> =
-        withContext(Dispatchers.IO) { GoogleRoutesClient(apiKey).routes(from, to, purpose) }
+    suspend fun alternatives(
+        from: LatLon, to: LatLon, purpose: Purpose = Purpose.USER, headingDeg: Float? = null, alternatives: Boolean = true,
+    ): Result<List<Route>> = withContext(Dispatchers.IO) { GoogleRoutesClient(apiKey).routes(from, to, purpose, headingDeg, alternatives) }
 
     suspend fun sample(): Result<Route> = withContext(Dispatchers.IO) {
         runCatching { assets.open(SAMPLE_ASSET).use { String(it.readBytes()) } }

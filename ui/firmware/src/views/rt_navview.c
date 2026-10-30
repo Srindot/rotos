@@ -93,7 +93,7 @@ static RtHudData hud_free(const RnTracker *trk, const RtNavViewOpts *opt)
         d.next_dist_m = (said > 0.0f) ? fmaxf(said - trk->speed_mps * age_s, 0.0f) : 0.0f;
         d.next_road = g->road;
         d.eta_s = (g->eta_s == RN_GUIDE_UNKNOWN32) ? trk->last.eta_s : g->eta_s;
-        d.remaining_m = (g->remaining_m == RN_GUIDE_UNKNOWN32) ? 0.0f : (float)g->remaining_m;
+        d.remaining_m = (g->remaining_m == RN_GUIDE_UNKNOWN32) ? trk->last.remaining_m : (float)g->remaining_m;
     }
     d.link_lost = opt->link_lost;
     d.gps_stale = opt->gps_stale;

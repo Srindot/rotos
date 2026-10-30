@@ -44,6 +44,7 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
     /** One line send at a time: two would eat each other's ACKs, or an old line land after a new one. */
     private val lineLock = Mutex()
     private var lastLogMs = 0L
+    private var heldLogged = false
     private var fixes = 0
 
     /**
@@ -79,23 +80,40 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
         host.warmMap(pts)                                    // detours / reroutes: their map ready ahead
     }
 
+    /** The ride began on a quick map (new streets): build and send the full one in the background. */
+    suspend fun completeMap(here: LatLon) = mapFor(here, allowQuick = false)
+
     suspend fun onFix(scope: CoroutineScope, raw: Fix) {
         val fix = FixAhead.now(raw)
         val trusted = RerouteRules.trusted(fix.speedMps, fix.accuracyM)
         val f = follower
-        val along = f?.let { val (x, y) = it.line.pxOf(LatLon(fix.lat, fix.lon)); it.follow(x, y, trusted) }
+        val course = fix.headingDeg.takeIf { trusted && it >= 0f }
+        val along = f?.let { val (x, y) = it.line.pxOf(LatLon(fix.lat, fix.lon)); it.follow(x, y, trusted, course) }
         position(fix, along)
         if (ride.lineLost && f != null) {
             ride.lineLost = false
             scope.launch { if (!resendLine()) ride.lineLost = true }          // after a reconnect
         }
+        // Google's "Rerouting…" is remembered even while busy, until a reroute actually runs
+        if (GuidanceBus.now.value?.rerouting == true) ride.watch = ride.watch.copy(googleRerouting = true)
         if (ride.busy || !trusted) return
         val here = LatLon(fix.lat, fix.lon)
         if (f != null && along != null) {
             val d = RerouteRules.decide(along, GuidanceBus.now.value, f.line.maneuvers, ride.watch, System.currentTimeMillis())
-            ride.watch = d.watch
+            val launches = d.reroute && ride.mayReroute(urgent = d.urgent)
+            // a GOOGLE decision clears googleRerouting: only keep that if the reroute really runs
+            ride.watch = if (d.why == RerouteWhy.GOOGLE && !launches) d.watch.copy(googleRerouting = true) else d.watch
             d.note?.let { host.log(it) }
-            if (d.reroute && ride.mayReroute(offLine = along.wantsReroute)) scope.launch { reroute(scope, here, along.remainingM) }
+            if (d.reroute) {
+                if (launches) {
+                    heldLogged = false
+                    val heading = fix.headingDeg.takeIf { it >= 0f && fix.speedMps >= RerouteRules.MIN_SPEED_MPS }
+                    scope.launch { reroute(scope, here, d.why, heading) }
+                } else if (!heldLogged) {
+                    heldLogged = true                        // once per hold, not per fix
+                    host.log("reroute (${d.why}) held ${ride.holdS()} s: repeated reroutes back off")
+                }
+            }
         } else if (!ride.line && RerouteRules.offMap(here, ride.coverage)) {
             scope.launch { refresh(here) }
         }
@@ -162,23 +180,28 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
      * Google took another road: its new route as the new line, at once. The old
      * line stays if anything fails, and the next try comes within seconds.
      */
-    private suspend fun reroute(scope: CoroutineScope, here: LatLon, leftM: Float) {
+    private suspend fun reroute(scope: CoroutineScope, here: LatLon, why: RerouteWhy, headingDeg: Float?) {
         ride.rerouting = true
         ride.watch = RerouteWatch()
         try {
-            host.log("route changed: new Google route from %.5f,%.5f".format(here.lat, here.lon))
-            val route = host.findRoute(ride.cfg.copy(origin = here), Purpose.AUTO).getOrElse {
+            host.log("route changed ($why): new Google route from %.5f,%.5f heading %s".format(here.lat, here.lon,
+                headingDeg?.let { "%.0f".format(it) } ?: "-"))
+            // off the line before Google Maps caught up: its summary still shows the road just left,
+            // so take Google's best route from here and this heading, not the one matching that summary
+            val route = host.findRoute(ride.cfg.copy(origin = here), Purpose.AUTO, headingDeg,
+                matchGoogle = why != RerouteWhy.OFF_LINE).getOrElse {
                 host.log("reroute: ${it.message?.take(100)}: keeping the line, trying again shortly")
                 ride.failed()
                 return
             }
             if (ride.pack == null) return
-            val same = RerouteRules.sameRoute(ride.route, leftM, route)
-            ride.rerouted(same)                               // the same route again: back off
+            val same = RerouteRules.sameRoute(ride.route, route)
+            ride.rerouted(same)                               // the same road again: back off
             if (same) {
-                host.log("reroute: Google's route is the one ROTOS shows; next check in ${ride.holdS()} s")
+                host.log("reroute: Google's route runs on the line ROTOS shows; next check in ${ride.holdS()} s")
                 return
             }
+            host.log("reroute: new line %.1f km (Google's route from here)".format(route.distanceM / 1000f))
             val (pts, turns) = RouteLine.pointsOf(route)
             val sent = lineLock.withLock {
                 // built here, inside the lock, in the pixels of the map ROTOS holds *now*
@@ -221,19 +244,23 @@ class MapRide(private val host: RideHost, private val send: FrameSender, private
      * ROTOS. A reroute while it is built is not lost: the newest route is drawn
      * on the new map, and gets a map of its own if that one does not cover it.
      */
-    private suspend fun mapFor(here: LatLon) {
+    private suspend fun mapFor(here: LatLon, allowQuick: Boolean = true) {
         if (ride.mapping) return
         ride.mapping = true
         try {
-            for (round in 1..MAP_ROUNDS) {
+            var quickOk = allowQuick                         // new streets: the first few km first
+            for (round in 1..MAP_ROUNDS + 1) {
                 val target = ride.route ?: return
-                host.log("new route leaves the map: building its map in the background")
-                val plan = host.replan(ride.cfg.copy(origin = here), Purpose.AUTO, target) ?: return
+                host.log(if (quickOk) "new route leaves the map: building its map in the background"
+                         else "the full map for the route, in the background")
+                val plan = host.replan(ride.cfg.copy(origin = here), Purpose.AUTO, target, quickIfNew = quickOk) ?: return
+                quickOk = false
                 if (!host.sendMap(plan.pack)) return
                 send.prep(Packets.PREP_IDLE)
                 ride.routeId = plan.pack.routeId
                 ride.coverage = plan.route.points
                 start(plan, ride.route ?: target)            // the newest route, in the new map's pixels
+                if (plan.quick) continue                     // the quick map is on ROTOS: now the full one
                 val drawn = ride.route ?: return
                 if (drawn === target || covered(RouteLine.pointsOf(drawn).first)) return
             }

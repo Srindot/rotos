@@ -38,4 +38,10 @@ void hal_storage_service(void);
 bool hal_storage_settings_load(uint8_t *out, uint32_t n);
 bool hal_storage_settings_save(const uint8_t *in, uint32_t n);
 
+/* The ride in progress (rt_resume), so a power cut at a signal does not end
+ * it: saved every ~30 s while riding, cleared when the ride ends. */
+bool hal_storage_ride_load(uint8_t *out, uint32_t n);
+bool hal_storage_ride_save(const uint8_t *in, uint32_t n);
+void hal_storage_ride_clear(void);
+
 #endif /* HAL_STORAGE_H */

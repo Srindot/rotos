@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
+import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.StatusBarNotification
 import dev.rotos.app.util.AppLog
 import dev.rotos.app.util.AppPresence
@@ -60,9 +61,19 @@ class MapsNotificationListener : NotificationListenerService() {
         activeNotifications?.filter { isNavigation(it) }?.forEach { onNotificationPosted(it) }
     }
 
+    /**
+     * Would the phone itself alert for this one? Silent / muted channels, apps the
+     * rider turned down and anything Do Not Disturb holds back stay off ROTOS too.
+     */
+    private fun alerts(sbn: StatusBarNotification): Boolean = runCatching {
+        val r = Ranking()
+        if (!currentRanking.getRanking(sbn.key, r)) return@runCatching true
+        r.importance >= android.app.NotificationManager.IMPORTANCE_DEFAULT && r.matchesInterruptionFilter()
+    }.getOrDefault(true)
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (!isNavigation(sbn)) {
-            NoteReader.read(this, sbn)?.let { NotifyBus.post(it) }
+            if (alerts(sbn)) NoteReader.read(this, sbn)?.let { NotifyBus.post(it) }
             return
         }
         activeKey = sbn.key

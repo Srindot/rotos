@@ -13,12 +13,20 @@ import dev.rotos.app.route.AreaRoute
 import dev.rotos.app.route.GoogleTarget
 import dev.rotos.app.route.LatLon
 import dev.rotos.app.route.Route
+import dev.rotos.app.route.RouteCut
 import dev.rotos.app.route.RouteMatcher
 import dev.rotos.app.route.RouteLoader
 import dev.rotos.app.route.RouteRepository
 
 /** Route -> NativeNav -> map pack -> preview, in that order. */
 class RoutePlanner(private val context: Context, private val onPicked: (List<Route>, Int, GoogleTarget?) -> Unit = { _, _, _ -> }) {
+    companion object {
+        /** The quick first map covers this much of a route through new streets. */
+        const val QUICK_M = 3_000
+        /** At least this share of the route's map saved = a known area: no quick map. */
+        const val KNOWN_SHARE = 0.9f
+    }
+
     private val repo = RouteRepository(BuildConfig.MAPS_API_KEY, context.assets)
 
     /**
@@ -29,7 +37,7 @@ class RoutePlanner(private val context: Context, private val onPicked: (List<Rou
      */
     suspend fun plan(
         cfg: RideConfig, from: LatLon, progress: (BuildProgress) -> Unit, target: GoogleTarget? = null,
-        purpose: Purpose = Purpose.USER, given: Route? = null,
+        purpose: Purpose = Purpose.USER, given: Route? = null, quickIfNew: Boolean = false,
     ): Result<Plan> {
         val src = when {
             given != null -> "the new route"
@@ -44,19 +52,27 @@ class RoutePlanner(private val context: Context, private val onPicked: (List<Rou
             cfg.area -> Result.success(AreaRoute.around(from))
             else -> route(cfg, from, target, purpose)
         }.getOrElse { return Result.failure(it) }
-        val loaded = RouteLoader.load(route).getOrElse { return Result.failure(it) }
+        val builder = MapPackBuilder(context.cacheDir, BuildConfig.MAPS_API_KEY, BlockCache.of(context.filesDir),
+            java.io.File(context.filesDir, "tiles"))
+        // new streets: a quick first map of the route's first few km (a few dozen tiles, on ROTOS in
+        // seconds); the caller then builds the full one in the background. Known streets: all at once.
+        val quick = quickIfNew && cfg.googleNav && !cfg.area && route.distanceM > QUICK_M * 3 / 2 &&
+            builder.knownShare(RouteLine.pointsOf(route).first) < KNOWN_SHARE
+        val mapped = if (quick) RouteCut.first(route, QUICK_M) else route
+        val loaded = RouteLoader.load(mapped).getOrElse { return Result.failure(it) }
         val buffer = if (cfg.googleNav && !cfg.area) MapPackBuilder.ROUTE_BUFFER_PX else MapPackBuilder.BUFFER_PX
-        val pack = MapPackBuilder(context.cacheDir, BuildConfig.MAPS_API_KEY, BlockCache.of(context.filesDir), java.io.File(context.filesDir, "tiles")).build(loaded, progress, flyovers = !cfg.googleNav, bufferPx = buffer, purpose = purpose)
+        val pack = builder.build(loaded, progress, flyovers = !cfg.googleNav, bufferPx = buffer, purpose = purpose)
             .getOrElse { return Result.failure(it) }
         // An area map has no route: its sweep line only chose the tiles, so it is not drawn.
         val preview = NavThread.run { MapPreview.render(pack, if (cfg.area) emptyList() else loaded.points) }
-        val key = if (cfg.useSample || cfg.area) cfg.planKey else "$from->${cfg.destination}"
-        return Result.success(Plan(key, loaded, pack, preview, route))
+        val key = (if (cfg.useSample || cfg.area) cfg.planKey else "$from->${cfg.destination}") +
+            if (quick) "#quick" else ""
+        return Result.success(Plan(key, loaded, pack, preview, route, quick))
     }
 
     /** Only Google's route from [from] to the destination (one Routes call, no map): reroutes. */
-    suspend fun route(cfg: RideConfig, from: LatLon, target: GoogleTarget?, purpose: Purpose): Result<Route> =
-        repo.alternatives(from, cfg.destination, purpose).map { all ->
+    suspend fun route(cfg: RideConfig, from: LatLon, target: GoogleTarget?, purpose: Purpose, headingDeg: Float? = null): Result<Route> =
+        repo.alternatives(from, cfg.destination, purpose, headingDeg, alternatives = target != null).map { all ->
             val best = RouteMatcher.pick(all, target)
             onPicked(all, best, target)
             all[best]

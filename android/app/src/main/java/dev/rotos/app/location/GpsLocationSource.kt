@@ -41,7 +41,10 @@ class GpsLocationSource(private val context: Context) : LocationSource {
             val prev = lastFix
             val rough = prev != null && loc.accuracy > maxOf(3f * prev.accuracyM, 60f) &&
                 loc.time - lastMs < 5_000L
-            if (!rough && (loc.time > lastMs + 200 || (loc.time >= lastMs && loc.accuracy < 20f))) {
+            // riding: a fix with no speed / course (a network fix) would read 0 km/h and jump the marker
+            val blind = prev != null && prev.speedMps >= MOVING_MPS && (!loc.hasSpeed() || !loc.hasBearing()) &&
+                loc.time - lastMs < 3_000L
+            if (!rough && !blind && (loc.time > lastMs + 200 || (loc.time >= lastMs && loc.accuracy < 20f))) {
                 lastMs = loc.time
                 val f = toFix(loc)
                 lastFix = f
@@ -73,7 +76,8 @@ class GpsLocationSource(private val context: Context) : LocationSource {
                 val last = lastFix
                 // standing still: repeat; no real fix for 10 s (tunnel): stop, ROTOS shows WAITING FOR GPS.
                 // Never while moving: a "speed 0" repeat of an old position would drag ROTOS back.
-                val still = last != null && (last.speedMps < 0f || last.speedMps < STILL_MPS)
+                // speed < 0 is "unknown", not standing still (a tunnel: stop, ROTOS says WAITING FOR GPS)
+                val still = last != null && last.speedMps >= 0f && last.speedMps < STILL_MPS
                 if (last != null && still && now - lastSentWall > 1500L && now - lastRealWall < 10_000L) {
                     val repeat = last.copy(tMs = (android.os.SystemClock.elapsedRealtime()).toInt(), unixS = now / 1000.0,
                         speedMps = 0f)
@@ -105,6 +109,7 @@ class GpsLocationSource(private val context: Context) : LocationSource {
     companion object {
         private const val INTERVAL_MS = 500L
         private const val STILL_MPS = 0.8f
+        private const val MOVING_MPS = 2f
         private const val FUSED = "fused"                // LocationManager.FUSED_PROVIDER (API 31)
         private const val MAX_AGE_MS = 5 * 60_000L
 

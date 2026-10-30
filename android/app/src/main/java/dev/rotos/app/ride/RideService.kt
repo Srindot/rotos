@@ -23,6 +23,7 @@ import dev.rotos.app.map.PackBase
 import dev.rotos.app.map.LinkWire
 import dev.rotos.app.mirror.GuidanceBus
 import dev.rotos.app.nav.Ack
+import dev.rotos.app.nav.DeviceStatus
 import dev.rotos.app.nav.NativeNav
 import dev.rotos.app.nav.NavThread
 import dev.rotos.app.nav.Packets
@@ -127,6 +128,8 @@ class RideService : Service(), RideHost {
     @Volatile private var autoTriedMs = 0L
     @Volatile private var tipShown = false
     @Volatile private var destCheckMs = 0L
+    /** When the link to ROTOS dropped (0 = up): power cut or Bluetooth? see onDeviceStatus. */
+    @Volatile private var linkLostMs = 0L
     @Volatile private var userStopped = false        // mirrored in RouteMemory.stopped
     private var lastNotifyMs = 0L
 
@@ -232,6 +235,7 @@ class RideService : Service(), RideHost {
         }
         val r = ActiveRide(cfg, if (auto) Purpose.AUTO else Purpose.USER)
         ride = r
+        destCheckMs = System.currentTimeMillis()             // Google may still show the old trip for a while
         autoRide = auto && cfg.area                          // a ride the rider started never ends on its own
         setStopped(false)                                // a new ride: Google's turns show again
         // the rider's own share starts the 3 h memory; an automatic resume must not keep renewing it
@@ -310,6 +314,8 @@ class RideService : Service(), RideHost {
         val l = LinkOpener.open(this@RideService, this, cfg, ::log, persistent,
             onTry = { _status.update { it.copy(link = LinkState.CONNECTING) } },
             onUp = {
+                autoFails = 0                                // ROTOS is here now: try a waiting auto-start at once
+                autoTriedMs = 0L
                 foreground("ROTOS connected")
                 ride?.lineLost = true                    // a reconnect: ROTOS may have restarted
             })
@@ -326,15 +332,49 @@ class RideService : Service(), RideHost {
         launch {
             l.state.collect { st ->
                 _status.update { it.copy(link = st, peer = l.peer) }
-                if (st == LinkState.CONNECTING) foreground("Reconnecting to ROTOS…")
+                if (st == LinkState.CONNECTING) {
+                    if (linkLostMs == 0L) linkLostMs = System.currentTimeMillis()   // for onDeviceStatus
+                    foreground("Reconnecting to ROTOS…")
+                }
             }
         }
-        launch { LinkOpener.route(l, acks, lineAcks, { s.calls }, ::log) }
+        launch { LinkOpener.route(l, acks, lineAcks, { s.calls }, ::log, ::onDeviceStatus) }
         launch { Dashboard(this@RideService, send, ::here, ::log).run(cfg.origin) }
         launch { s.mirror.run() }
         launch { autoRideLoop(cfg) }
         if (cfg.callAlerts) startCalls(this, s) else log("call alerts disabled")
         if (cfg.notifyAlerts) launch { NotifyForwarder(send, ::log).run() } else log("notifications to ROTOS disabled")
+    }
+
+    /**
+     * ROTOS says how long it has been up and why it started: after a drop this
+     * tells a power cut (engine off at a signal: ROTOS restarted) from a
+     * Bluetooth drop (ROTOS stayed on), how long it was off, and how long the
+     * phone then took to find it. ROTOS decides itself whether the ride goes on.
+     */
+    private fun onDeviceStatus(d: DeviceStatus) {
+        val now = System.currentTimeMillis()
+        val lost = linkLostMs
+        if (lost != 0L) {
+            linkLostMs = 0L
+            val downS = (now - lost) / 1000.0
+            if (d.uptimeMs < now - lost) {
+                val offS = ((now - d.uptimeMs) - lost) / 1000.0
+                log("ROTOS restarted (%s): off ~%.0f s; phone found it %.1f s after it came back (link down %.0f s)"
+                    .format(DeviceStatus.reasonName(d.resetReason), maxOf(offS, 0.0), d.uptimeMs / 1000.0, downS))
+            } else {
+                log("Bluetooth drop: ROTOS stayed on (up %.0f min); link back after %.0f s".format(d.uptimeMs / 60_000.0, downS))
+            }
+        } else if (d.uptimeMs < 60_000L) {
+            log("ROTOS started %.0f s ago (%s)".format(d.uptimeMs / 1000.0, DeviceStatus.reasonName(d.resetReason)))
+        }
+        when {
+            d.flags and DeviceStatus.RIDE_RESUMED != 0 -> log("ROTOS: same ride continued (it was off %d s)".format(d.offS))
+            d.flags and DeviceStatus.RIDE_CLOSED != 0 ->
+                log("ROTOS: off too long (%s): it closed the old ride".format(if (d.offS >= 0) "${d.offS} s" else "unknown"))
+            d.flags and DeviceStatus.RIDE_FOUND != 0 -> log("ROTOS: a ride was in progress at its restart: resuming")
+        }
+        ride?.lineLost = true                                // its line lives in RAM: send it again now
     }
 
     private fun startCalls(sessionScope: CoroutineScope, s: Session) {
@@ -401,6 +441,10 @@ class RideService : Service(), RideHost {
     /** Google Maps' navigation is over: stopped / tip / retry state belong to it. */
     private fun navigationOver() {
         setStopped(false)
+        // that trip is over: its destination must not come back with the next navigation
+        // (the memory only bridges app restarts *during* a navigation)
+        RouteMemory(this).forget()
+        session?.mirror?.forgetRoads()
         tipShown = false
         autoFails = 0
         // every Google-mirrored ride ends with Google's navigation (arrived / stopped): no GPS, no
@@ -454,7 +498,7 @@ class RideService : Service(), RideHost {
     private suspend fun runRide(r: ActiveRide) = coroutineScope {
         val cfg = r.cfg
         _status.update { it.copy(phase = "connecting", error = "") }
-        val s = ensureSession(cfg).await()                                     // 1 + 2
+        val s = ensureSession(cfg, persistent = true).await()                  // 1 + 2 (ROTOS may still be off)
         if (s == null) {
             fail(if (cfg.link == LinkKind.BLE) "ROTOS not found. Is it powered on and within a few metres?"
                  else "Simulator not reachable at ${cfg.host}:${cfg.port}")
@@ -464,7 +508,7 @@ class RideService : Service(), RideHost {
             fail("ROTOS link is down")
             return@coroutineScope
         }
-        var plan = replan(cfg, r.purpose)                                       // 3
+        var plan = replan(cfg, r.purpose, quickIfNew = true)                    // 3 (new streets: a quick map first)
         if (plan == null && _status.value.error.contains(MapPackBuilder.TOO_LONG) && cfg.googleNav && !cfg.area) {
             // too long for one map: Google's turns + the map around the rider, refreshed as they ride
             log("route too long for one ROTOS map: riding with the map around you instead")
@@ -485,7 +529,11 @@ class RideService : Service(), RideHost {
             if (cfg.googleNav) " (Google Maps navigates, ROTOS shows the map)" else "")
         val mapRide = if (cfg.googleNav) MapRide(this@RideService, s.send, r) else null
         val engineRide = if (cfg.googleNav) null else EngineRide(this@RideService, s.send, r)
-        mapRide?.start(plan)                                                   // the line, as ROUTE packets
+        mapRide?.start(plan, if (plan.quick) plan.source else null)            // the line, as ROUTE packets
+        if (plan.quick && mapRide != null) {
+            log("quick map on ROTOS (first ${RoutePlanner.QUICK_M / 1000} km): the full map follows")
+            launch { mapRide.completeMap(cfg.origin) }
+        }
         // conflate: a fix that waited behind a slow one is stale, only the newest counts
         source.fixes().conflate().collect { fix ->                            // 5
             if (lastFix == null || autoFails != 0) autoFails = 0                 // a fix arrived: the auto-start worked
@@ -498,7 +546,7 @@ class RideService : Service(), RideHost {
     }
 
     /** Plans (or waits for a "Plan route" already running) while forwarding progress to ROTOS at 1 Hz. */
-    override suspend fun replan(cfg: RideConfig, purpose: Purpose, route: Route?): Plan? = coroutineScope {
+    override suspend fun replan(cfg: RideConfig, purpose: Purpose, route: Route?, quickIfNew: Boolean): Plan? = coroutineScope {
         val send = session?.send
         val forward = launch {
             while (isActive) {
@@ -507,7 +555,7 @@ class RideService : Service(), RideHost {
             }
         }
         planJob?.join()
-        val plan = ensurePlan(cfg, purpose, route)
+        val plan = ensurePlan(cfg, purpose, route, quickIfNew)
         forward.cancel()
         if (plan == null) send?.prep(Packets.PREP_FAILED) else send?.prep(Packets.PREP_READY, 100)
         plan
@@ -525,21 +573,28 @@ class RideService : Service(), RideHost {
         }
     }
 
-    override suspend fun findRoute(cfg: RideConfig, purpose: Purpose): Result<Route> {
-        val target = session?.mirror?.target(REROUTE_TARGET_WAIT_MS)       // reroutes: never wait long
-        return RoutePlanner(this) { all, best, t -> log(PlanLog.picked(all, best, t)) }.route(cfg, cfg.origin, target, purpose)
+    /**
+     * [matchGoogle] false: the rider left the line and Google Maps has not caught up yet - its
+     * summary still describes the road they left, so Google's best route from here (with their
+     * heading) is taken instead of the alternative closest to that old summary.
+     */
+    override suspend fun findRoute(cfg: RideConfig, purpose: Purpose, headingDeg: Float?, matchGoogle: Boolean): Result<Route> {
+        val target = if (matchGoogle) session?.mirror?.target(REROUTE_TARGET_WAIT_MS) else null   // reroutes: never wait long
+        return RoutePlanner(this) { all, best, t -> log(PlanLog.picked(all, best, t)) }.route(cfg, cfg.origin, target, purpose, headingDeg)
     }
 
-    private suspend fun ensurePlan(cfg: RideConfig, purpose: Purpose, route: Route? = null): Plan? {
+    private suspend fun ensurePlan(cfg: RideConfig, purpose: Purpose, route: Route? = null, quickIfNew: Boolean = false): Plan? {
         val cur = _status.value.plan
         // the cached plan only for the same trip AND the same route (a reroute's map is a different route)
         if (cur != null && cur.key == cfg.planKey && (route == null || cur.source === route) &&
             NavThread.run { NativeNav.packRouteId() } == cur.pack.routeId) return cur
         _status.update { it.copy(phase = "planning", error = "", build = null, transfer = null, nav = null) }
         log("planning ${cfg.planKey}")
-        val target = if (cfg.googleNav && !cfg.area && route == null) session?.mirror?.target() else null
+        // a share while Google still shows the previous trip: wait for its summary of the new one
+        val fresh = purpose == Purpose.USER && GuidanceBus.now.value != null
+        val target = if (cfg.googleNav && !cfg.area && route == null) session?.mirror?.target(fresh = fresh) else null
         val planner = RoutePlanner(this) { all, best, t -> log(PlanLog.picked(all, best, t)) }
-        return planner.plan(cfg, cfg.origin, { p -> _status.update { it.copy(build = p) } }, target, purpose, route).fold(
+        return planner.plan(cfg, cfg.origin, { p -> _status.update { it.copy(build = p) } }, target, purpose, route, quickIfNew).fold(
             onSuccess = { p ->
                 PlanLog.planned(p).forEach(::log)
                 _status.update { it.copy(phase = "planned", plan = p) }

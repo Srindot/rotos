@@ -13,8 +13,13 @@
 
 static void on_nav(RtApp *app, const RnNavState *s, uint32_t now_ms)
 {
-    rt_phone_on_night(&app->phone, (s->flags & RN_NAV_NIGHT) != 0u);
-    bool ours = app->have_pack && s->route_id == app->pack.h.route_id;
+    if ((s->flags & RN_NAV_ARRIVED) == 0u) {         /* the phone's arrival note carries no day/night */
+        rt_phone_on_night(&app->phone, (s->flags & RN_NAV_NIGHT) != 0u);
+    }
+    /* Google Maps mode: a position is lat/lon, right on any map we hold (no waiting for the
+     * phone to switch route ids after a new map) */
+    bool free = (s->flags & RN_NAV_FREE) != 0u;
+    bool ours = app->have_pack && (s->route_id == app->pack.h.route_id || free);
     app->wrong_map = !ours;
     if (!ours) {
         return;                                   /* map for this route not here yet */
@@ -24,7 +29,6 @@ static void on_nav(RtApp *app, const RnNavState *s, uint32_t now_ms)
         rn_tracker_on_nav(&app->tracker, s, now_ms);
         return;
     }
-    bool free = (s->flags & RN_NAV_FREE) != 0u;      /* Google Maps navigates */
     bool ride_left = (free || s->along_m < app->pack.h.total_m - 20.0f) && (s->flags & RN_NAV_ARRIVED) == 0u;
     if (app->state != RT_ST_SUMMARY && ride_left) {
         rn_tracker_reset(&app->tracker);          /* a ride begins (or resumes after a restart) */
@@ -40,7 +44,12 @@ static void on_map_reply(RtApp *app, const RnPacket *p, const RtMapRxReply *r, u
     }
     if (r->committed) {
         rt_app_load_pack(app);
+        RnNavState last = app->tracker.last;
+        bool keep = app->tracker.have && app->tracker.free;
         rn_tracker_reset(&app->tracker);          /* positions refer to the new route */
+        if (keep) {                               /* Google Maps mode: lat/lon, the map stays on screen */
+            rn_tracker_on_nav(&app->tracker, &last, now_ms);
+        }
         app->nav_seen_ms = now_ms;                /* a new map is not an abandoned ride */
         rt_ride_rebase(&app->ride);
     }

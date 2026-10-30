@@ -46,7 +46,11 @@ data class RideConfig(
 
 /** A planned route with its map pack (held inside NativeNav) and preview. */
 /** [source]: the route as Google gave it (its polylines feed the ROTOS line); null for area maps' sweeps. */
-data class Plan(val key: String, val route: LoadedRoute, val pack: PackInfo, val preview: Bitmap, val source: Route? = null)
+/** [quick]: the map covers only the route's first few km (new streets): the full map is still to come. */
+data class Plan(
+    val key: String, val route: LoadedRoute, val pack: PackInfo, val preview: Bitmap, val source: Route? = null,
+    val quick: Boolean = false,
+)
 
 data class NavSnapshot(
     val fixes: Int,

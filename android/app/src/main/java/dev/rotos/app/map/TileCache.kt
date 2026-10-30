@@ -26,7 +26,7 @@ class TileCache(private val root: File, private val source: Source) {
     ) {
         companion object {
             fun google(tiles: GoogleTiles, session: String) = Source(
-                "Google", "gmap/v${GoogleTiles.STYLE_VERSION}", 4, AppIdentity.googleHeaders(), GoogleApi.TILES,
+                "Google", "gmap/v${GoogleTiles.STYLE_VERSION}", 12, AppIdentity.googleHeaders(), GoogleApi.TILES,   // 12 at once: new areas fast
             ) { z, x, y -> tiles.tileUrl(z, x, y, session) }
         }
     }
